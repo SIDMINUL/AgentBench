@@ -20,34 +20,87 @@ class MockProvider:
             return {"type": "final", "answer": "10"}
         return {"type": "final", "answer": ""}
 
+
 class OllamaProvider:
     def next_action(self, task, history, model):
-        instructions = {
-            "task": task["prompt"],
-            "allowed_tools": {
-                "product_lookup": {
-                    "description": "Look up an inventory item by SKU.",
-                    "arguments": {"sku": "string"},
-                }
-            },
-            "history": history,
-            "required_json": {
-                "tool_call": {"type": "tool_call", "tool": "product_lookup", "arguments": {"sku": "SKU-RED-01"}},
-                "final": {"type": "final", "answer": "your answer"},
-            },
-            "instruction": "Choose one next action. Return only valid JSON. Never invent tool results. Use only listed tools.",
-        }
+        allowed_tools = (
+            "product_lookup(sku: string) — returns product name and stock count."
+            if "product_lookup" in task.get("tools", [])
+            else "No tools are available for this task."
+        )
+        prompt = f"""
+You are an agent completing one benchmark task.
+TASK: {task["prompt"]}
+ALLOWED TOOLS: {allowed_tools}
+OBSERVATIONS SO FAR: {json.dumps(history)}
+
+Choose exactly one action. Return one JSON object and no other text.
+To call a tool, use:
+{{"type":"tool_call","tool":"product_lookup","arguments":{{"sku":"SKU-BLUE-02"}}}}
+To finish, use:
+{{"type":"final","answer":"your concise answer"}}
+Do not claim you called a tool unless you return a tool_call action.
+Do not invent tool results. Only use tools listed above.
+"""
         response = httpx.post(
             f"{settings.ollama_base_url.rstrip('/')}/api/generate",
-            json={"model": model, "prompt": json.dumps(instructions), "stream": False, "format": "json"},
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {"temperature": 0},
+            },
             timeout=settings.request_timeout_seconds,
         )
         response.raise_for_status()
-        raw = response.json().get("response", "")
-        action = json.loads(raw)
-        if not isinstance(action, dict) or action.get("type") not in {"tool_call", "final"}:
-            raise ValueError("Model returned an invalid action schema")
-        return action
+        raw = response.json().get("response", "").strip()
+
+        try:
+            action = json.loads(raw)
+        except json.JSONDecodeError:
+            # Plain text is still a usable final response for non-tool tasks.
+            if "product_lookup" not in task.get("tools", []):
+                return {"type": "final", "answer": raw}
+            raise ValueError(f"Model did not return valid JSON: {raw[:500]}")
+
+        if not isinstance(action, dict):
+            raise ValueError(f"Model action must be a JSON object: {raw[:500]}")
+
+        # Normalize common model variations into AgentBench's canonical schema.
+        action_type = action.get("type") or action.get("action")
+        if action_type in {"final_answer", "answer", "respond"}:
+            action_type = "final"
+        if action_type in {"tool", "call_tool", "function_call"}:
+            action_type = "tool_call"
+
+        if action_type == "final":
+            answer = action.get("answer", action.get("content", action.get("final_answer", "")))
+            return {"type": "final", "answer": str(answer)}
+
+        if action_type == "tool_call":
+            tool_name = action.get("tool", action.get("tool_name", action.get("name")))
+            arguments = action.get("arguments", action.get("tool_input", action.get("parameters", {})))
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    raise ValueError(f"Tool arguments were not valid JSON: {arguments[:300]}")
+            if not isinstance(arguments, dict):
+                raise ValueError(f"Tool arguments must be a JSON object: {raw[:500]}")
+            return {"type": "tool_call", "tool": tool_name, "arguments": arguments}
+
+        # Some models wrap the selected action in a nested field.
+        nested = action.get("tool_call")
+        if isinstance(nested, dict):
+            return {
+                "type": "tool_call",
+                "tool": nested.get("tool", nested.get("name")),
+                "arguments": nested.get("arguments", nested.get("parameters", {})),
+            }
+
+        raise ValueError(f"Model returned an unsupported action schema: {raw[:500]}")
+
 
 def get_provider(name: str):
     if name == "mock":
