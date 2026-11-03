@@ -10,6 +10,7 @@ api_url = st.sidebar.text_input("API URL", "http://localhost:8000")
 provider = st.sidebar.selectbox("Provider", ["mock", "ollama"])
 model = st.sidebar.text_input("Model", "llama3.2:3b" if provider == "ollama" else "mock-agent")
 
+st.header("Single-model benchmark")
 if st.button("Run benchmark", type="primary"):
     try:
         response = httpx.post(
@@ -35,6 +36,41 @@ if st.button("Run benchmark", type="primary"):
             st.info("Mock results validate the pipeline only, not model capability.")
     except Exception as exc:
         st.error(f"Benchmark request failed: {exc}")
+
+st.divider()
+st.header("Compare models")
+st.caption("Runs the same task set sequentially for every selected model. Each run is saved to history.")
+comparison_models = st.text_input(
+    "Ollama model names (comma-separated)",
+    "llama3.2:3b, llama3.1:8b",
+)
+if st.button("Compare models"):
+    models = [item.strip() for item in comparison_models.split(",") if item.strip()]
+    if len(models) < 2:
+        st.warning("Enter at least two distinct model names.")
+    elif len({item.casefold() for item in models}) != len(models):
+        st.warning("Model names must be unique.")
+    else:
+        try:
+            with st.spinner("Running the same benchmark tasks against each model..."):
+                response = httpx.post(
+                    f"{api_url.rstrip('/')}/api/benchmark/compare",
+                    json={"provider": provider, "models": models},
+                    timeout=900,
+                )
+            response.raise_for_status()
+            comparison = response.json()
+            st.success(f'{comparison["comparison_count"]} model runs completed and saved.')
+            comparison_df = pd.DataFrame(comparison["ranking"])
+            comparison_df["task_success_rate"] = comparison_df["task_success_rate"].map(lambda value: f"{value:.1%}")
+            comparison_df["tool_call_success_rate"] = comparison_df["tool_call_success_rate"].map(lambda value: f"{value:.1%}")
+            st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+            st.caption(comparison["ranking_rule"])
+            st.bar_chart(
+                pd.DataFrame(comparison["results"]).set_index("model")["task_success_rate"]
+            )
+        except Exception as exc:
+            st.error(f"Model comparison failed: {exc}")
 
 st.divider()
 st.subheader("Benchmark run history")
