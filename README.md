@@ -4,13 +4,12 @@ A reproducible platform for evaluating LLM agents on multi-step tasks, tool use,
 
 ## Features
 - Mock and Ollama model providers
-- Multi-step agent execution with allowlisted tools
-- Per-step execution traces and tool error tracking
+- Multi-step agent execution with allowlisted tools and execution traces
 - Exact-match task scoring, tool-call success, average and p95 latency
-- FastAPI benchmark API
-- Streamlit dashboard with saved benchmark history
+- FastAPI API and Streamlit dashboard
 - SQLite persistence for CLI and API benchmark runs
-- Multi-model comparison using an identical task set
+- Multi-model comparison using identical task sets
+- Optional Ollama-based LLM-as-a-Judge scoring
 - Automated tests
 
 ## Quick start
@@ -21,7 +20,6 @@ python -m venv .venv
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
-
 API docs: http://127.0.0.1:8000/docs
 
 In another terminal:
@@ -29,7 +27,7 @@ In another terminal:
 streamlit run dashboard/app.py
 ```
 
-## Run a benchmark
+## Run benchmarks
 ```bash
 python -m app.cli --provider mock
 ollama pull llama3.2:3b
@@ -37,26 +35,31 @@ python -m app.cli --provider ollama --model llama3.2:3b
 ```
 
 ## Compare models
-Send at least two model names to the comparison endpoint:
-```bash
-curl -X POST http://127.0.0.1:8000/api/benchmark/compare ^
-  -H "Content-Type: application/json" ^
-  -d "{\"provider\":\"ollama\",\"models\":[\"llama3.2:3b\",\"llama3.1:8b\"]}"
+Use `POST /api/benchmark/compare` with at least two model names:
+```json
+{"provider":"ollama","models":["llama3.2:3b","qwen2.5:3b"]}
 ```
-The dashboard also provides a model comparison panel. Every model is evaluated against the same task set, and each individual run is saved in SQLite. Results are ranked by task success rate, with average latency used to break ties. Model execution is sequential to avoid competing for local GPU memory.
+The dashboard provides the same workflow. Runs execute sequentially and are saved to SQLite.
 
-Each CLI or API run is saved to `data/agentbench.db` by default. Override the location with `AGENTBENCH_DB_PATH`.
+## LLM-as-a-Judge
+Use `POST /api/benchmark/history/{run_id}/judge` with:
+```json
+{"judge_model":"llama3.2:3b"}
+```
+The judge scores correctness, reasoning quality, tool-use quality, and overall quality from 1–5, with a short rationale per task. Judgments are stored with the run and never overwrite exact-match metrics. These model-generated scores are supplementary, not ground truth.
 
-## API endpoints
-- `GET /api/health` — service health
-- `GET /api/tasks` — benchmark task definitions
-- `POST /api/benchmark/run` — execute and persist a benchmark
-- `POST /api/benchmark/compare` — compare 2–8 models on the same tasks
-- `GET /api/benchmark/history?limit=50` — list recent runs
-- `GET /api/benchmark/history/{run_id}` — retrieve a complete run and its traces
+## Persistence and API
+Runs are saved to `data/agentbench.db` by default. Set `AGENTBENCH_DB_PATH` to change the location.
+- `GET /api/health`
+- `GET /api/tasks`
+- `POST /api/benchmark/run`
+- `POST /api/benchmark/compare`
+- `POST /api/benchmark/history/{run_id}/judge`
+- `GET /api/benchmark/history?limit=50`
+- `GET /api/benchmark/history/{run_id}`
 
-## Evaluation note
-Mock results validate the evaluation pipeline only; they are not evidence of model performance. Exact-match scores are intentionally strict and can mark semantically correct but differently phrased answers as incorrect. A comparison is only meaningful when the same task definitions and provider settings are used for every model.
+## Evaluation notes
+Mock results validate orchestration only, not model performance. Exact-match scoring can mark semantically correct but differently phrased answers as incorrect. LLM-as-a-Judge should be calibrated against human-reviewed examples before being treated as reliable.
 
 ## Safety
 Agent tools are allowlisted per task. The agent cannot execute arbitrary shell commands or Python code.
