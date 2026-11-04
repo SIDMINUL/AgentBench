@@ -2,22 +2,94 @@ import json
 import httpx
 from app.config import settings
 
+
 class MockProvider:
-    """Deterministic agent used to test orchestration, not model quality."""
+    """Deterministic agent for validating benchmark orchestration, not model quality."""
+
     def next_action(self, task, history, model):
-        if task["id"] == "multi_001":
-            if not any(item.get("type") == "tool_result" for item in history):
+        task_id = task["id"]
+
+        static_answers = {
+            "math_001": "15",
+            "logic_001": "10",
+            "math_002": "25",
+            "logic_002": "Cara",
+            "planning_001": "implementation, testing, deployment",
+            "planning_002": "10:10",
+        }
+        if task_id in static_answers:
+            return {"type": "final", "answer": static_answers[task_id]}
+
+        tool_results = [
+            item for item in history
+            if item.get("type") == "tool_result"
+            and item.get("tool") == "product_lookup"
+        ]
+        tool_errors = [
+            item for item in history
+            if item.get("type") == "tool_error"
+            and item.get("tool") == "product_lookup"
+        ]
+        looked_up = {
+            item["result"]["sku"]
+            for item in tool_results
+        }
+
+        if task_id == "multi_001":
+            if "SKU-BLUE-02" not in looked_up:
                 return {
                     "type": "tool_call",
                     "tool": "product_lookup",
                     "arguments": {"sku": "SKU-BLUE-02"},
                 }
-            result = next(item["result"] for item in reversed(history) if item.get("type") == "tool_result")
-            return {"type": "final", "answer": "REORDER" if result["stock"] < 10 else "STOCK_OK"}
-        if task["id"] == "math_001":
-            return {"type": "final", "answer": "15"}
-        if task["id"] == "logic_001":
-            return {"type": "final", "answer": "10"}
+            return {"type": "final", "answer": "REORDER"}
+
+        if task_id == "multi_002":
+            if "SKU-RED-01" not in looked_up:
+                return {
+                    "type": "tool_call",
+                    "tool": "product_lookup",
+                    "arguments": {"sku": "SKU-RED-01"},
+                }
+            return {"type": "final", "answer": "STOCK_OK"}
+
+        if task_id == "multi_003":
+            for sku in ("SKU-BLUE-02", "SKU-RED-01"):
+                if sku not in looked_up:
+                    return {
+                        "type": "tool_call",
+                        "tool": "product_lookup",
+                        "arguments": {"sku": sku},
+                    }
+            stock_by_sku = {
+                item["result"]["sku"]: item["result"]["stock"]
+                for item in tool_results
+            }
+            winner = max(stock_by_sku, key=stock_by_sku.get)
+            return {"type": "final", "answer": winner}
+
+        if task_id == "recovery_001":
+            if not tool_errors and not looked_up:
+                return {
+                    "type": "tool_call",
+                    "tool": "product_lookup",
+                    "arguments": {"sku": "SKU-MISSING-99"},
+                }
+            if "SKU-RED-01" not in looked_up:
+                return {
+                    "type": "tool_call",
+                    "tool": "product_lookup",
+                    "arguments": {"sku": "SKU-RED-01"},
+                }
+            recovered = next(
+                item["result"] for item in reversed(tool_results)
+                if item["result"]["sku"] == "SKU-RED-01"
+            )
+            return {
+                "type": "final",
+                "answer": "AVAILABLE" if recovered["stock"] > 0 else "OUT_OF_STOCK",
+            }
+
         return {"type": "final", "answer": ""}
 
 
@@ -41,6 +113,7 @@ To finish, use:
 {{"type":"final","answer":"your concise answer"}}
 Do not claim you called a tool unless you return a tool_call action.
 Do not invent tool results. Only use tools listed above.
+If a tool returns an error, inspect the error and decide whether another allowed tool call can recover the task.
 """
         response = httpx.post(
             f"{settings.ollama_base_url.rstrip('/')}/api/generate",
@@ -59,15 +132,13 @@ Do not invent tool results. Only use tools listed above.
         try:
             action = json.loads(raw)
         except json.JSONDecodeError:
-            # Plain text is still a usable final response for non-tool tasks.
-            if "product_lookup" not in task.get("tools", []):
+            if not task.get("tools"):
                 return {"type": "final", "answer": raw}
             raise ValueError(f"Model did not return valid JSON: {raw[:500]}")
 
         if not isinstance(action, dict):
             raise ValueError(f"Model action must be a JSON object: {raw[:500]}")
 
-        # Normalize common model variations into AgentBench's canonical schema.
         action_type = action.get("type") or action.get("action")
         if action_type in {"final_answer", "answer", "respond"}:
             action_type = "final"
@@ -90,7 +161,6 @@ Do not invent tool results. Only use tools listed above.
                 raise ValueError(f"Tool arguments must be a JSON object: {raw[:500]}")
             return {"type": "tool_call", "tool": tool_name, "arguments": arguments}
 
-        # Some models wrap the selected action in a nested field.
         nested = action.get("tool_call")
         if isinstance(nested, dict):
             return {
