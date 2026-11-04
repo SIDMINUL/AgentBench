@@ -5,8 +5,34 @@ from app.config import settings
 from app.tasks import TASKS
 
 
+def _deterministic_tool_score(task: dict, trace: list) -> int:
+    required_tools = set(task.get("tools", []))
+    calls = [
+        step for step in trace
+        if step.get("type") == "tool_call"
+    ]
+
+    if not required_tools:
+        return 5 if not calls else 1
+
+    successful_tools = {
+        step.get("tool")
+        for step in calls
+        if step.get("success") is True
+    }
+    if required_tools.issubset(successful_tools) and all(
+        step.get("success") is True for step in calls
+    ):
+        return 5
+    if successful_tools:
+        return 3
+    return 1
+
+
 def judge_run(result: dict, judge_model: str) -> dict:
     task_by_id = {task["id"]: task for task in TASKS}
+    result_by_id = {item["task_id"]: item for item in result["results"]}
+
     payload = [
         {
             "task_id": item["task_id"],
@@ -29,6 +55,7 @@ Scores must be JSON integers from 1 (poor) to 5 (excellent).
 Correctness: does the answer satisfy the task and agree with the reference?
 Reasoning quality: does the answer and trace support a sound conclusion?
 Overall: your holistic score for the task.
+Do not evaluate tool-use quality; it is calculated separately from the recorded execution trace.
 Do not omit any task_id.
 DATA:
 {json.dumps(payload, ensure_ascii=False)}
@@ -57,7 +84,7 @@ DATA:
     if not isinstance(evaluations, list):
         raise ValueError(f"Judge response must contain an evaluations array: {raw[:500]}")
 
-    expected_ids = {item["task_id"] for item in payload}
+    expected_ids = set(result_by_id)
     normalized = {}
 
     for item in evaluations:
@@ -70,7 +97,6 @@ DATA:
         scores = {}
         for key in ("correctness", "reasoning_quality", "overall"):
             value = item.get(key)
-            # Accept integer strings from small local models, but not booleans/floats.
             if isinstance(value, str) and value.strip().isdigit():
                 value = int(value.strip())
             if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 5:
@@ -78,26 +104,8 @@ DATA:
             scores[key] = value
 
         task = task_by_id.get(task_id, {})
-        trace = next(
-            (row.get("trace", []) for row in result["results"] if row["task_id"] == task_id),
-            [],
-        )
-        allowed_tools = task.get("tools", [])
-        actual_tool_calls = sum(
-            1 for step in trace
-            if step.get("type") == "tool_call" or step.get("tool")
-        )
-
-        # Tool-use quality is deterministic for tasks that do not permit tools.
-        if not allowed_tools:
-            scores["tool_use_quality"] = 5 if actual_tool_calls == 0 else 1
-        else:
-            value = item.get("tool_use_quality")
-            if isinstance(value, str) and value.strip().isdigit():
-                value = int(value.strip())
-            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 5:
-                raise ValueError(f"Judge returned invalid tool_use_quality score for {task_id}")
-            scores["tool_use_quality"] = value
+        trace = result_by_id[task_id].get("trace", [])
+        scores["tool_use_quality"] = _deterministic_tool_score(task, trace)
 
         normalized[task_id] = {
             "task_id": task_id,
@@ -114,5 +122,5 @@ DATA:
         "judge_model": judge_model,
         "average_overall_score": round(average, 2),
         "evaluations": [normalized[item["task_id"]] for item in result["results"]],
-        "note": "Tool-use quality for tasks that prohibit tools is calculated from the task definition and execution trace. Other LLM-judge scores are supplementary and do not replace deterministic benchmark metrics.",
+        "note": "Tool-use quality is calculated deterministically from each task's allowed tools and recorded execution trace. Correctness, reasoning quality, and overall scores are supplementary LLM-judge assessments.",
     }
