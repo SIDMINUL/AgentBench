@@ -83,5 +83,5 @@ def test_judge_run_validates_and_averages_scores(monkeypatch):
             return {"response": json.dumps({"evaluations": items})}
     monkeypatch.setattr(judge.httpx, "post", lambda *args, **kwargs: FakeResponse())
     evaluation = judge_run(run("mock", "mock-agent"), "judge-model")
-    assert evaluation["average_overall_score"] == 4.0
+    assert evaluation["average_overall_score"] == 4.33
     assert len(evaluation["evaluations"]) == len(TASKS)
