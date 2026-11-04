@@ -7,10 +7,7 @@ from app.tasks import TASKS
 
 def _deterministic_tool_score(task: dict, trace: list) -> int:
     required_tools = set(task.get("tools", []))
-    calls = [
-        step for step in trace
-        if step.get("type") == "tool_call"
-    ]
+    calls = [step for step in trace if step.get("type") == "tool_call"]
 
     if not required_tools:
         return 5 if not calls else 1
@@ -47,15 +44,13 @@ def judge_run(result: dict, judge_model: str) -> dict:
     ]
 
     prompt = f"""
-You are an impartial evaluator for LLM agent benchmark results.
+You are an impartial evaluator of reasoning quality for LLM agent benchmark results.
 Evaluate every supplied task exactly once.
 Return only JSON in this shape:
-{{"evaluations":[{{"task_id":"id","correctness":1,"reasoning_quality":1,"overall":1,"rationale":"brief explanation"}}]}}
-Scores must be JSON integers from 1 (poor) to 5 (excellent).
-Correctness: does the answer satisfy the task and agree with the reference?
-Reasoning quality: does the answer and trace support a sound conclusion?
-Overall: your holistic score for the task.
-Do not evaluate tool-use quality; it is calculated separately from the recorded execution trace.
+{{"evaluations":[{{"task_id":"id","reasoning_quality":1,"rationale":"brief explanation"}}]}}
+reasoning_quality must be a JSON integer from 1 (poor) to 5 (excellent).
+Assess whether the execution trace shows a sound, coherent process leading to the answer.
+Do not score correctness, overall quality, or tool use; those are calculated independently.
 Do not omit any task_id.
 DATA:
 {json.dumps(payload, ensure_ascii=False)}
@@ -94,22 +89,36 @@ DATA:
         if task_id not in expected_ids:
             continue
 
-        scores = {}
-        for key in ("correctness", "reasoning_quality", "overall"):
-            value = item.get(key)
-            if isinstance(value, str) and value.strip().isdigit():
-                value = int(value.strip())
-            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 5:
-                raise ValueError(f"Judge returned invalid {key} score for {task_id}")
-            scores[key] = value
+        reasoning_quality = item.get("reasoning_quality")
+        if isinstance(reasoning_quality, str) and reasoning_quality.strip().isdigit():
+            reasoning_quality = int(reasoning_quality.strip())
+        if (
+            isinstance(reasoning_quality, bool)
+            or not isinstance(reasoning_quality, int)
+            or not 1 <= reasoning_quality <= 5
+        ):
+            raise ValueError(
+                f"Judge returned invalid reasoning_quality score for {task_id}"
+            )
 
+        recorded = result_by_id[task_id]
         task = task_by_id.get(task_id, {})
-        trace = result_by_id[task_id].get("trace", [])
-        scores["tool_use_quality"] = _deterministic_tool_score(task, trace)
+        correctness = 5 if recorded.get("success") is True else 1
+        tool_use_quality = _deterministic_tool_score(
+            task,
+            recorded.get("trace", []),
+        )
+        overall = round(
+            (correctness + reasoning_quality + tool_use_quality) / 3,
+            2,
+        )
 
         normalized[task_id] = {
             "task_id": task_id,
-            **scores,
+            "correctness": correctness,
+            "reasoning_quality": reasoning_quality,
+            "overall": overall,
+            "tool_use_quality": tool_use_quality,
             "rationale": str(item.get("rationale", ""))[:1000],
         }
 
@@ -122,5 +131,5 @@ DATA:
         "judge_model": judge_model,
         "average_overall_score": round(average, 2),
         "evaluations": [normalized[item["task_id"]] for item in result["results"]],
-        "note": "Tool-use quality is calculated deterministically from each task's allowed tools and recorded execution trace. Correctness, reasoning quality, and overall scores are supplementary LLM-judge assessments.",
+        "note": "Correctness is derived from the benchmark's deterministic success flag. Tool-use quality is calculated from allowed tools and the recorded execution trace. The LLM judge scores reasoning quality only; overall is the mean of these three dimensions.",
     }
