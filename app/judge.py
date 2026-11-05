@@ -81,6 +81,7 @@ DATA:
 
     expected_ids = set(result_by_id)
     normalized = {}
+    overall_score_sum = 0.0
 
     for item in evaluations:
         if not isinstance(item, dict):
@@ -108,10 +109,9 @@ DATA:
             task,
             recorded.get("trace", []),
         )
-        overall = round(
-            (correctness + reasoning_quality + tool_use_quality) / 3,
-            2,
-        )
+        raw_overall = (correctness + reasoning_quality + tool_use_quality) / 3
+        overall_score_sum += raw_overall
+        overall = round(raw_overall, 2)
 
         normalized[task_id] = {
             "task_id": task_id,
@@ -126,7 +126,8 @@ DATA:
         missing = sorted(expected_ids - set(normalized))
         raise ValueError(f"Judge omitted task evaluations: {', '.join(missing)}")
 
-    average = sum(item["overall"] for item in normalized.values()) / len(normalized)
+    # Average unrounded task scores to avoid cumulative rounding drift.
+    average = overall_score_sum / len(normalized)
     return {
         "judge_model": judge_model,
         "average_overall_score": round(average, 2),
