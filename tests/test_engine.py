@@ -229,3 +229,30 @@ def test_repeated_failed_tool_call_is_suppressed():
     assert result["duplicate_tool_calls"] == 2
     assert sum(step["type"] == "tool_call" for step in result["trace"]) == 1
     assert result["trace"][-1]["type"] == "tool_call_duplicate"
+
+def test_duplicate_call_replays_cached_result_as_normal_observation():
+    task = next(task for task in TASKS if task["id"] == "multi_001")
+    observed_histories = []
+
+    class ReplayAwareProvider:
+        def next_action(self, task, history, model):
+            observed_histories.append(list(history))
+            duplicate = any(item.get("type") == "duplicate_tool_call" for item in history)
+            if duplicate:
+                replayed = [
+                    item for item in history
+                    if item.get("type") == "tool_result" and item.get("replayed")
+                ]
+                assert replayed
+                assert replayed[-1]["result"]["stock"] == 4
+                return {"type": "final", "answer": "REORDER"}
+            return {
+                "type": "tool_call",
+                "tool": "product_lookup",
+                "arguments": {"sku": "SKU-BLUE-02"},
+            }
+
+    result = run_task(task, ReplayAwareProvider(), "mock", "replay-aware")
+    assert result["success"] is True
+    assert result["duplicate_tool_calls"] == 1
+
