@@ -410,6 +410,46 @@ def test_engine_blocks_multi_tool_final_until_all_required_lookups_succeed():
     assert result["trace"][-1]["type"] == "final"
 
 
+def test_ollama_prompt_forces_final_after_observations_complete(monkeypatch):
+    import json
+    from app.providers import OllamaProvider
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"response": json.dumps({"type": "final", "answer": "REORDER"})}
+
+    def fake_post(url, json=None, timeout=None):
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+    task = next(task for task in TASKS if task["id"] == "recovery_002")
+    history = [
+        {"type": "tool_error", "tool": "product_lookup", "error": "Unknown SKU"},
+        {
+            "type": "tool_result",
+            "tool": "product_lookup",
+            "result": {"sku": "SKU-BLUE-02", "name": "Blue Notebook", "stock": 4},
+        },
+        {
+            "type": "tool_call_blocked_observations_complete",
+            "message": "All required tool observations are already available.",
+        },
+    ]
+    action = OllamaProvider().next_action(task, history, "test-model")
+    prompt = captured["payload"]["prompt"]
+
+    assert action == {"type": "final", "answer": "REORDER"}
+    assert "FINAL ANSWER REQUIRED" in prompt
+    assert "Your next action MUST be a final action" in prompt
+    assert "use the successful fallback lookup result" in prompt
+
+
 def test_ollama_prompt_lists_outstanding_required_tool_calls(monkeypatch):
     import json
     from app.providers import OllamaProvider
