@@ -184,9 +184,25 @@ def run(provider_name: str = "mock", model: str = "mock-agent") -> dict:
     duplicate_tool_calls = sum(item["duplicate_tool_calls"] for item in results)
     p95 = latencies[max(0, math.ceil(0.95 * total) - 1)] if total else 0.0
 
+    category_metrics = {}
+    for category in sorted({item["category"] for item in results}):
+        category_results = [
+            item for item in results if item["category"] == category
+        ]
+        category_total = len(category_results)
+        category_passed = sum(item["success"] for item in category_results)
+        category_metrics[category] = {
+            "total_tasks": category_total,
+            "successful_tasks": category_passed,
+            "task_success_rate": (
+                category_passed / category_total if category_total else 0.0
+            ),
+        }
+
     return {
         "provider": provider_name,
         "model": model,
+        "category_metrics": category_metrics,
         "total_tasks": total,
         "successful_tasks": passed,
         "task_success_rate": passed / total if total else 0.0,
