@@ -32,6 +32,41 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                 raise ValueError("Agent action must be a JSON object")
 
             if action.get("type") == "final":
+                required_calls = task.get("required_tool_calls", [])
+                completed_calls = [
+                    item for item in history if item.get("type") == "tool_result"
+                ]
+                missing_calls = [
+                    requirement for requirement in required_calls
+                    if not any(
+                        item.get("tool") == requirement["tool"]
+                        and all(
+                            item.get("result", {}).get(key) == value
+                            for key, value in requirement["arguments"].items()
+                        )
+                        for item in completed_calls
+                    )
+                ]
+                if missing_calls:
+                    message = (
+                        "Final answer blocked: required tool observations are missing. "
+                        "Execute every REQUIRED TOOL CALL before answering."
+                    )
+                    history.append({
+                        "type": "required_tool_calls",
+                        "missing": missing_calls,
+                        "message": message,
+                    })
+                    trace.append({
+                        "step": step_number,
+                        "type": "final_blocked_required_tools",
+                        "answer": str(action.get("answer", "")),
+                        "missing": missing_calls,
+                        "message": message,
+                    })
+                    status = "running"
+                    continue
+
                 recovery = task.get("required_recovery")
                 has_tool_error = any(
                     item.get("type") == "tool_error" for item in history
