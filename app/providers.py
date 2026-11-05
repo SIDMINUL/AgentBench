@@ -120,6 +120,7 @@ FAILURE-RECOVERY RULES:
 - Read the task instructions again and perform the specified recovery action using a different, valid argument.
 - If the task names a fallback lookup, you MUST make that tool_call before giving a final answer.
 - After the fallback tool_result arrives, base your final answer only on the returned fields and the task's condition.
+- Once the required fallback result is present, do not make any more tool calls. Return the final answer immediately using that result.
 - Do not return a final answer while a required recovery lookup is still outstanding.
 """
         reasoning_guidance = ""
