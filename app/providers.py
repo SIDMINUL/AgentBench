@@ -138,11 +138,13 @@ TOOL-RESULT DECISION RULES:
             reasoning_guidance = """
 REASONING AND VERIFICATION RULES:
 - Solve the task carefully before producing the final answer. Do not guess or rush.
-- For arithmetic, identify the starting quantity and apply each operation in the order stated.
-- For fractions, calculate the fraction of the original quantity before applying later changes.
-- For elapsed-time problems, add each duration sequentially to the start time; convert minutes past 60 into the next hour.
+- For count problems with multiple groups, add every group's quantity first to get the total; then subtract only the items explicitly removed. Do not subtract removed items from just one group unless the question asks for that group's count.
+- For fraction changes, first calculate the changed amount from the original total (total divided by the denominator for a unit fraction); subtract borrowed/removed items, then apply returns or additions in the order stated.
+- For elapsed-time problems, convert the start time to minutes after midnight, add every duration including breaks, then convert the final total back to HH:MM. Do not omit a break or round a duration.
 - For relational logic, translate each comparison into an ordering before selecting the answer.
-- Check the result once by recomputing it using a second simple method.
+- Before finalizing arithmetic, write down the numeric expression internally, evaluate it left to right, and independently check the result. Never output the working unless asked.
+- If the answer is a time, verify by adding the total elapsed minutes back to the start time.
+- Return only the exact requested answer format.
 - Return only the exact requested answer format. Do not include workings unless asked.
 """
         recovery_requirement = task.get("required_recovery")
