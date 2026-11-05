@@ -31,6 +31,59 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
             if not isinstance(action, dict):
                 raise ValueError("Agent action must be a JSON object")
 
+            # Once every mandatory observation has been collected, additional
+            # tool calls are unnecessary and often indicate a small-model loop.
+            # Give the provider explicit feedback and one more chance to answer.
+            if action.get("type") == "tool_call":
+                required_calls = task.get("required_tool_calls", [])
+                completed_calls = [
+                    item for item in history if item.get("type") == "tool_result"
+                ]
+                all_required_calls_complete = bool(required_calls) and all(
+                    any(
+                        item.get("tool") == requirement["tool"]
+                        and all(
+                            item.get("result", {}).get(key) == value
+                            for key, value in requirement["arguments"].items()
+                        )
+                        for item in completed_calls
+                    )
+                    for requirement in required_calls
+                )
+                recovery = task.get("required_recovery")
+                recovery_complete = bool(
+                    recovery
+                    and any(item.get("type") == "tool_error" for item in history)
+                    and any(
+                        item.get("type") == "tool_result"
+                        and item.get("tool") == recovery["tool"]
+                        and all(
+                            item.get("result", {}).get(key) == value
+                            for key, value in recovery["arguments"].items()
+                        )
+                        for item in completed_calls
+                    )
+                )
+                if all_required_calls_complete or recovery_complete:
+                    message = (
+                        "All required tool observations are already available. "
+                        "Do not call another tool; use the observations in history "
+                        "and return the final answer."
+                    )
+                    history.append({
+                        "type": "tool_call_blocked_observations_complete",
+                        "message": message,
+                    })
+                    trace.append({
+                        "step": step_number,
+                        "type": "tool_call_blocked_observations_complete",
+                        "tool": action.get("tool"),
+                        "arguments": action.get("arguments", {}),
+                        "message": message,
+                    })
+                    status = "running"
+                    continue
+
             if action.get("type") == "final":
                 required_calls = task.get("required_tool_calls", [])
                 completed_calls = [
