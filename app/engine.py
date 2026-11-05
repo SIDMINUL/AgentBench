@@ -8,6 +8,7 @@ from app.tasks import TASKS
 from app.tools import execute_tool
 
 def normalize(text: str) -> str:
+    text = re.sub(r"\s*,\s*", ", ", text)
     return re.sub(r"\s+", " ", text).strip().casefold().strip(" .")
 
 def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
