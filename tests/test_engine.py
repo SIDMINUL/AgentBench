@@ -558,3 +558,39 @@ def test_ollama_reasoning_prompt_has_explicit_count_fraction_and_time_checks(mon
     prompt = captured["payload"]["prompt"]
     assert "minutes after midnight" in prompt
     assert "including breaks" in prompt
+
+
+
+def test_ollama_multi_tool_prompt_explains_numeric_comparison(monkeypatch):
+    import json
+    from app.providers import OllamaProvider
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"response": json.dumps({"type": "final", "answer": "SKU-RED-01"})}
+
+    def fake_post(url, json=None, timeout=None):
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+    task = next(task for task in TASKS if task["id"] == "multi_003")
+    history = [
+        {"type": "tool_result", "tool": "product_lookup",
+         "result": {"sku": "SKU-BLUE-02", "stock": 4}},
+        {"type": "tool_result", "tool": "product_lookup",
+         "result": {"sku": "SKU-RED-01", "stock": 27}},
+    ]
+
+    action = OllamaProvider().next_action(task, history, "test-model")
+    prompt = captured["payload"]["prompt"]
+
+    assert action == {"type": "final", "answer": "SKU-RED-01"}
+    assert "Read the numeric stock field from BOTH successful" in prompt
+    assert "27 > 4" in prompt
+    assert "Do not select the first SKU" in prompt
