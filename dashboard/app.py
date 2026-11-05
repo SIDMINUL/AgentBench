@@ -35,7 +35,7 @@ if st.button("Run benchmark", type="primary"):
 st.divider()
 st.header("Compare models")
 st.caption("Runs identical tasks sequentially; every model run is saved.")
-comparison_models = st.text_input("Ollama model names (comma-separated)", "llama3.2:3b, qwen2.5:3b")
+comparison_models = st.text_input("Ollama model names (comma-separated)", "qwen2.5:3b, llama3.2:3b, llama3:latest, llama2:latest")
 if st.button("Compare models"):
     models = [item.strip() for item in comparison_models.split(",") if item.strip()]
     if len(models) < 2 or len({item.casefold() for item in models}) != len(models):
