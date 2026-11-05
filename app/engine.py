@@ -12,6 +12,35 @@ def normalize(text: str) -> str:
     text = re.sub(r"\s*,\s*", ", ", text)
     return re.sub(r"\s+", " ", text).strip().casefold().strip(" .")
 
+def _independent_verification(task: dict, candidate: str) -> dict | None:
+    """Recompute selected benchmark answers from structured task data, not the LLM."""
+    spec = task.get("verification_spec")
+    if not spec:
+        return None
+    kind = spec.get("kind")
+    if kind == "count_after_removal":
+        reference = str(sum(spec["groups"]) - spec["removed"])
+    elif kind == "fraction_then_return":
+        numerator, denominator = spec["fraction"]
+        borrowed = spec["total"] * numerator // denominator
+        reference = str(spec["total"] - borrowed + spec["returned"])
+    elif kind == "elapsed_time":
+        hours, minutes = map(int, spec["start"].split(":"))
+        total_minutes = hours * 60 + minutes + sum(spec["durations"])
+        reference = f"{(total_minutes // 60) % 24:02d}:{total_minutes % 60:02d}"
+    else:
+        return None
+    candidate_correct = normalize(candidate) == normalize(reference)
+    return {
+        "method": "deterministic_structured_recalculation",
+        "candidate_output": candidate,
+        "reference_output": reference,
+        "candidate_correct": candidate_correct,
+        "correction_suggested": None if candidate_correct else reference,
+        "correction_applied": False,
+    }
+
+
 def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
     started = time.perf_counter()
     history = []
@@ -283,12 +312,15 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
             trace.append({"step": step_number, "type": "error", "error": error})
             break
 
+    verification = _independent_verification(task, output) if status == "completed" else None
     latency_ms = (time.perf_counter() - started) * 1000
     return {
         "task_id": task["id"],
         "category": task["category"],
         "output": output,
+        "raw_output": output,
         "expected": task["expected"],
+        "verification": verification,
         "success": success,
         "status": status,
         "latency_ms": latency_ms,
@@ -325,8 +357,20 @@ def run(provider_name: str = "mock", model: str = "mock-agent") -> dict:
             ),
         }
 
+    verified_results = [item for item in results if item.get("verification") is not None]
+    verified_correct = sum(item["verification"]["candidate_correct"] for item in verified_results)
+    verification_metrics = {
+        "supported_tasks": len(verified_results),
+        "raw_correct": verified_correct,
+        "raw_accuracy": verified_correct / len(verified_results) if verified_results else None,
+        "corrections_suggested": sum(item["verification"]["correction_suggested"] is not None for item in verified_results),
+        "correction_applied": False,
+        "method": "deterministic_structured_recalculation",
+    }
+
     return {
         "provider": provider_name,
+        "verification_metrics": verification_metrics,
         "model": model,
         "category_metrics": category_metrics,
         "total_tasks": total,
