@@ -27,7 +27,9 @@ def test_benchmark_reports_category_level_metrics():
     }
     assert result["category_metrics"]["planning"]["total_tasks"] == 2
     assert result["category_metrics"]["tool_use"]["successful_tasks"] == 3
-    assert result["category_metrics"]["failure_recovery"] == {\n        "total_tasks": 3, "successful_tasks": 3, "task_success_rate": 1.0\n    }
+    assert result["category_metrics"]["failure_recovery"] == {
+        "total_tasks": 3, "successful_tasks": 3, "task_success_rate": 1.0
+    }
 
 
 def test_ollama_recovery_prompt_requires_fallback_lookup(monkeypatch):
