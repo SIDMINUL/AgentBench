@@ -32,6 +32,43 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                 raise ValueError("Agent action must be a JSON object")
 
             if action.get("type") == "final":
+                recovery = task.get("required_recovery")
+                has_tool_error = any(
+                    item.get("type") == "tool_error" for item in history
+                )
+                recovery_completed = False
+                if recovery:
+                    required_tool = recovery["tool"]
+                    required_arguments = recovery["arguments"]
+                    recovery_completed = any(
+                        item.get("type") == "tool_result"
+                        and item.get("tool") == required_tool
+                        and item.get("result", {}).get(
+                            next(iter(required_arguments)), None
+                        ) == next(iter(required_arguments.values()))
+                        for item in history
+                    )
+                if recovery and has_tool_error and not recovery_completed:
+                    message = (
+                        "Final answer blocked: the required recovery lookup has not "
+                        "succeeded. Execute the task's REQUIRED RECOVERY ACTION before "
+                        "returning a final answer."
+                    )
+                    history.append({
+                        "type": "recovery_required",
+                        "tool": recovery["tool"],
+                        "arguments": recovery["arguments"],
+                        "message": message,
+                    })
+                    trace.append({
+                        "step": step_number,
+                        "type": "final_blocked_recovery",
+                        "answer": str(action.get("answer", "")),
+                        "message": message,
+                    })
+                    status = "running"
+                    continue
+
                 output = str(action.get("answer", ""))
                 success = normalize(output) == normalize(task["expected"])
                 status = "completed"
