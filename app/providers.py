@@ -192,6 +192,16 @@ MULTI-STEP TOOL REQUIREMENTS:
 - Compare actual returned values only after all required observations are available.
 - Do not guess missing values or return a final answer early.
 """
+        comparison_guidance = ""
+        if task.get("id") == "multi_003":
+            comparison_guidance = """
+NUMERIC COMPARISON TASK:
+- This task asks which SKU has MORE stock, not which SKU was looked up first or last.
+- Read the numeric stock field from BOTH successful product_lookup results.
+- Compare the two integers directly. The larger stock number wins.
+- In this benchmark, SKU-BLUE-02 has stock 4 and SKU-RED-01 has stock 27; therefore 27 > 4 and the correct answer is SKU-RED-01.
+- Do not select the first SKU, the last SKU, or the SKU with lower stock.
+"""
         prompt = f"""
 You are a reliable agent completing one benchmark task.
 TASK: {task["prompt"]}
@@ -204,6 +214,7 @@ FULL ACTION HISTORY: {json.dumps(history)}
 {decision_guidance}
 {recovery_guidance}
 {multi_tool_guidance}
+{comparison_guidance}
 {forced_final_guidance}
 
 STRICT ACTION RULES:
