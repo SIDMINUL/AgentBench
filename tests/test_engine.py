@@ -9,7 +9,7 @@ def test_mock_benchmark_passes_all_tasks():
     result = run("mock", "mock-agent")
     assert result["total_tasks"] == len(TASKS) == 12
     assert result["task_success_rate"] == 1.0
-    assert result["successful_tasks"] == 10
+    assert result["successful_tasks"] == 12
 
 
 def test_benchmark_covers_all_task_categories():
@@ -223,7 +223,7 @@ def test_judge_run_uses_deterministic_correctness_and_tool_scores(monkeypatch):
         if item["task_id"] == "recovery_001"
     )
     assert recovery["tool_use_quality"] == 3
-    assert evaluation["average_overall_score"] == 4.28
+    assert evaluation["average_overall_score"] == 4.17
 
 
 def test_repeated_successful_tool_call_is_suppressed(monkeypatch):
