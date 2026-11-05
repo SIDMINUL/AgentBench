@@ -80,9 +80,18 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                     "success": False,
                     "message": message,
                 })
-                status = "repeated_action"
-                error = message
-                break
+                # Give the model one opportunity to use the cached result.
+                # If it repeats the same action again, stop the loop safely.
+                if duplicate_tool_calls >= 2:
+                    status = "repeated_action"
+                    error = (
+                        "Agent repeated an already-successful tool call twice; "
+                        "execution stopped to prevent an infinite action loop."
+                    )
+                    trace[-1]["message"] = error
+                    break
+                status = "running"
+                continue
 
             try:
                 result = execute_tool(tool_name, arguments)
