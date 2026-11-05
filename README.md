@@ -60,10 +60,10 @@ The mock provider is a deterministic fixture for testing the benchmark engine. I
 Use `POST /api/benchmark/compare` with at least two model names:
 
 ```json
-{"provider":"ollama","models":["llama3.2:3b","qwen2.5:3b"]}
+{"provider":"ollama","models":["qwen2.5:3b","llama3.2:3b","llama3:latest","llama2:latest"]}
 ```
 
-The dashboard provides the same workflow. Models run sequentially against the same task set and each run is saved to SQLite.
+The dashboard provides the same workflow. The default comparison includes Qwen 2.5 3B, Llama 3.2 3B, Llama 3, and Llama 2; verify that each model is installed locally with `ollama list` before running. Models run sequentially against the same task set and each run is saved to SQLite.
 
 ## LLM-as-a-Judge
 
