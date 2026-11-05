@@ -117,6 +117,7 @@ STRICT ACTION RULES:
 {{"type":"tool_call","tool":"product_lookup","arguments":{{"sku":"SKU-BLUE-02"}}}}
 {{"type":"final","answer":"your concise answer"}}
 Do not invent tool results or claim a tool was called unless you return a tool_call action.
+"""
         response = httpx.post(
             f"{settings.ollama_base_url.rstrip('/')}/api/generate",
             json={
