@@ -518,3 +518,43 @@ def test_ollama_prompt_lists_outstanding_required_tool_calls(monkeypatch):
     assert "SKU-RED-01" in prompt
     assert "Complete every listed required tool call" in prompt
     assert "Do not guess missing values" in prompt
+
+
+
+def test_ollama_reasoning_prompt_has_explicit_count_fraction_and_time_checks(monkeypatch):
+    import json
+    from app.providers import OllamaProvider
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"response": json.dumps({"type": "final", "answer": "10"})}
+
+    def fake_post(url, json=None, timeout=None):
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+    task = next(task for task in TASKS if task["id"] == "logic_001")
+    OllamaProvider().next_action(task, [], "test-model")
+    prompt = captured["payload"]["prompt"]
+
+    assert "add every group's quantity first" in prompt
+    assert "subtract only the items explicitly removed" in prompt
+    assert "numeric expression internally" in prompt
+
+    task = next(task for task in TASKS if task["id"] == "math_002")
+    OllamaProvider().next_action(task, [], "test-model")
+    prompt = captured["payload"]["prompt"]
+    assert "unit fraction" in prompt
+    assert "subtract borrowed/removed items, then apply returns" in prompt
+
+    task = next(task for task in TASKS if task["id"] == "planning_002")
+    OllamaProvider().next_action(task, [], "test-model")
+    prompt = captured["payload"]["prompt"]
+    assert "minutes after midnight" in prompt
+    assert "including breaks" in prompt
