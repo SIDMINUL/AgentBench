@@ -149,7 +149,9 @@ def run(provider_name: str = "mock", model: str = "mock-agent") -> dict:
         "tool_calls": tool_calls,
         "tool_errors": tool_errors,
         "duplicate_tool_calls": duplicate_tool_calls,
-        "tool_call_success_rate": (tool_calls - tool_errors) / tool_calls if tool_calls else 1.0,
+        "tool_call_success_rate": (
+            tool_calls - tool_errors - duplicate_tool_calls
+        ) / tool_calls if tool_calls else 1.0,
         "average_latency_ms": mean(latencies) if latencies else 0.0,
         "p95_latency_ms": p95,
         "results": results,
