@@ -410,6 +410,44 @@ def test_engine_blocks_multi_tool_final_until_all_required_lookups_succeed():
     assert result["trace"][-1]["type"] == "final"
 
 
+
+def test_ollama_tool_prompt_explains_numeric_thresholds(monkeypatch):
+    import json
+    from app.providers import OllamaProvider
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return { "response": json.dumps({"type": "final", "answer": "REORDER"}) }
+
+    def fake_post(url, json=None, timeout=None):
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+    task = next(task for task in TASKS if task["id"] == "recovery_002")
+    history = [
+        {"type": "tool_error", "tool": "product_lookup", "error": "Unknown SKU"},
+        {
+            "type": "tool_result",
+            "tool": "product_lookup",
+            "result": {"sku": "SKU-BLUE-02", "name": "Blue Notebook", "stock": 4},
+        },
+    ]
+
+    OllamaProvider().next_action(task, history, "test-model")
+    prompt = captured["payload"]["prompt"]
+
+    assert '"below N" means value < N' in prompt
+    assert '"at least N" means value >= N' in prompt
+    assert "a stock value of 4 is below 10" in prompt
+    assert "Do not copy an answer pattern from another task" in prompt
+
+
 def test_ollama_prompt_forces_final_after_observations_complete(monkeypatch):
     import json
     from app.providers import OllamaProvider
