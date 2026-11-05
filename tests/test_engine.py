@@ -378,4 +378,3 @@ def test_engine_blocks_final_until_required_recovery_succeeds():
     assert result["success"] is True
     assert any(step["type"] == "final_blocked_recovery" for step in result["trace"])
     assert result["trace"][-1]["type"] == "final"
-\n
