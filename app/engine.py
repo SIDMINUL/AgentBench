@@ -1,3 +1,4 @@
+import json
 import math
 import re
 import time
@@ -55,7 +56,7 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
 
             # Do not execute an identical successful tool call more than once.
             # This also catches non-consecutive loops such as A -> B -> A.
-            signature = (tool_name, repr(sorted(arguments.items())))
+            signature = (tool_name, json.dumps(arguments, sort_keys=True, separators=(",", ":")) )
             if signature in successful_tool_results:
                 duplicate_tool_calls += 1
                 previous_result = successful_tool_results[signature]
