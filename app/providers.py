@@ -6,43 +6,6 @@ from app.config import settings
 class MockProvider:
     """Deterministic agent for validating benchmark orchestration, not model quality."""
 
-    def _verify_reasoning_answer(self, task, candidate, model):
-        """Use an independent second model pass to verify known multi-step reasoning cases."""
-        prompt = f"""
-You are an independent answer verifier. Solve the task from scratch; do not assume the candidate is correct.
-TASK: {task["prompt"]}
-CANDIDATE ANSWER: {candidate}
-
-Verification procedure:
-- Re-read every quantity and operation in the task.
-- For counting, combine all groups before subtracting removed items.
-- For fractions, calculate the fraction of the original total, subtract it, then apply returns.
-- For elapsed time, add every duration, including breaks, to the start time.
-- Check the result independently.
-Return only a JSON object with this schema:
-{{"answer":"the corrected answer in the exact requested format"}}
-"""
-        response = httpx.post(
-            f"{settings.ollama_base_url.rstrip('/')}/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "format": "json",
-                "options": {"temperature": 0},
-            },
-            timeout=settings.request_timeout_seconds,
-        )
-        response.raise_for_status()
-        raw = response.json().get("response", "").strip()
-        try:
-            verified = json.loads(raw)
-        except json.JSONDecodeError:
-            return candidate
-        if isinstance(verified, dict) and verified.get("answer") is not None:
-            return str(verified["answer"])
-        return candidate
-
     def next_action(self, task, history, model):
         task_id = task["id"]
 
@@ -138,6 +101,43 @@ Return only a JSON object with this schema:
 
 
 class OllamaProvider:
+    def _verify_reasoning_answer(self, task, candidate, model):
+        """Use an independent second model pass to verify known multi-step reasoning cases."""
+        prompt = f"""
+You are an independent answer verifier. Solve the task from scratch; do not assume the candidate is correct.
+TASK: {task["prompt"]}
+CANDIDATE ANSWER: {candidate}
+
+Verification procedure:
+- Re-read every quantity and operation in the task.
+- For counting, combine all groups before subtracting removed items.
+- For fractions, calculate the fraction of the original total, subtract it, then apply returns.
+- For elapsed time, add every duration, including breaks, to the start time.
+- Check the result independently.
+Return only a JSON object with this schema:
+{{"answer":"the corrected answer in the exact requested format"}}
+"""
+        response = httpx.post(
+            f"{settings.ollama_base_url.rstrip('/')}/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {"temperature": 0},
+            },
+            timeout=settings.request_timeout_seconds,
+        )
+        response.raise_for_status()
+        raw = response.json().get("response", "").strip()
+        try:
+            verified = json.loads(raw)
+        except json.JSONDecodeError:
+            return candidate
+        if isinstance(verified, dict) and verified.get("answer") is not None:
+            return str(verified["answer"])
+        return candidate
+
     def next_action(self, task, history, model):
         allowed_tools = (
             "product_lookup(sku: string) — returns product name and stock count."
