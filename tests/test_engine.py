@@ -30,6 +30,47 @@ def test_benchmark_reports_category_level_metrics():
     assert result["category_metrics"]["failure_recovery"]["task_success_rate"] == 1.0
 
 
+def test_ollama_recovery_prompt_requires_fallback_lookup(monkeypatch):
+    import json
+    from app.providers import OllamaProvider
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"response": json.dumps({
+                "type": "tool_call",
+                "tool": "product_lookup",
+                "arguments": {"sku": "SKU-RED-01"},
+            })}
+
+    def fake_post(url, json=None, timeout=None):
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+    task = next(task for task in TASKS if task["id"] == "recovery_001")
+    history = [{
+        "type": "tool_error",
+        "tool": "product_lookup",
+        "error": "Unknown SKU: SKU-MISSING-99",
+    }]
+    action = OllamaProvider().next_action(task, history, "test-model")
+    prompt = captured["payload"]["prompt"]
+
+    assert action == {
+        "type": "tool_call",
+        "tool": "product_lookup",
+        "arguments": {"sku": "SKU-RED-01"},
+    }
+    assert "does not tell you the product's stock" in prompt
+    assert "you MUST make that tool_call" in prompt
+    assert "Do not return a final answer while a required recovery lookup is still outstanding" in prompt
+
+
 def test_ollama_reasoning_prompt_includes_verification_guidance(monkeypatch):
     import json
     from app.providers import OllamaProvider
