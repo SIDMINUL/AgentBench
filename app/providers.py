@@ -158,6 +158,19 @@ REASONING AND VERIFICATION RULES:
         required_tool_calls_text = (
             json.dumps(pending_tool_calls) if pending_tool_calls else "None"
         )
+        forced_final_guidance = ""
+        if any(
+            item.get("type") == "tool_call_blocked_observations_complete"
+            for item in history
+        ):
+            forced_final_guidance = """
+FINAL ANSWER REQUIRED:
+- The engine has blocked an unnecessary tool call because all required observations are already available.
+- Do not call any tool again. Your next action MUST be a final action.
+- Read the successful tool_result observations above and apply the condition in the original task.
+- For recovery tasks, use the successful fallback lookup result, not the failed initial lookup.
+- For comparison tasks, compare the returned stock values and return the requested SKU.
+"""
         multi_tool_guidance = ""
         if required_tool_calls:
             multi_tool_guidance = """
@@ -178,6 +191,7 @@ FULL ACTION HISTORY: {json.dumps(history)}
 {reasoning_guidance}
 {recovery_guidance}
 {multi_tool_guidance}
+{forced_final_guidance}
 
 STRICT ACTION RULES:
 - If no tools are available, return a final action. Never call any tool.
