@@ -123,6 +123,16 @@ FAILURE-RECOVERY RULES:
 - Once the required fallback result is present, do not make any more tool calls. Return the final answer immediately using that result.
 - Do not return a final answer while a required recovery lookup is still outstanding.
 """
+        decision_guidance = ""
+        if task.get("tools"):
+            decision_guidance = """
+TOOL-RESULT DECISION RULES:
+- Do not treat a successful lookup as automatically meaning STOCK_OK.
+- Extract the exact numeric stock value from the latest successful lookup relevant to the task.
+- Apply the comparison in the task literally: "below N" means value < N; "above N" means value > N; "at least N" means value >= N.
+- Select the branch whose condition is true. For example, a stock value of 4 is below 10, not at least 10.
+- Do not copy an answer pattern from another task. Re-evaluate the current task's condition every time.
+"""
         reasoning_guidance = ""
         if not task.get("tools"):
             reasoning_guidance = """
@@ -189,6 +199,7 @@ ALLOWED TOOLS: {allowed_tools}
 TOOL OBSERVATIONS (authoritative; use these instead of repeating calls): {json.dumps(tool_observations)}
 FULL ACTION HISTORY: {json.dumps(history)}
 {reasoning_guidance}
+{decision_guidance}
 {recovery_guidance}
 {multi_tool_guidance}
 {forced_final_guidance}
