@@ -8,6 +8,7 @@ A reproducible platform for evaluating LLM agents on reasoning, planning, multi-
 - Multi-step agent execution with per-task tool allowlists and required-observation guards
 - Execution traces containing tool arguments, observations, errors, and final answers
 - Deterministic exact-match task success, category-level success rates, tool-call success, average latency, and p95 latency
+- Independent deterministic verification for selected arithmetic/time tasks, preserving raw model answers and reporting suggested corrections separately
 - 12 benchmark tasks across reasoning, planning, tool use, and three failure-recovery scenarios
 - FastAPI API and Streamlit dashboard
 - SQLite persistence for CLI and API benchmark runs
@@ -101,7 +102,8 @@ Runs are saved to `data/agentbench.db` by default. Set `AGENTBENCH_DB_PATH` to c
 - Exact-match scoring can mark semantically correct but differently phrased answers as incorrect.
 - The inventory tool uses fixed fixture data; it does not connect to a live commerce system.
 - Latency depends on local hardware, model size, warm-up state, and Ollama configuration.
-- The Ollama prompt provides arithmetic and answer-verification guidance for tasks without tools; this is prompt guidance, not a guarantee of correct reasoning.
+- Selected arithmetic/time tasks have a deterministic verifier that recomputes answers from structured task data. It records the raw model answer, reference answer, and any suggested correction separately; it never overwrites the model output or changes the raw task-success score.
+- The verifier currently covers three templates: count after removal, fraction then return, and elapsed time. Other tasks are not independently verified by this mechanism.
 - Category-level metrics help isolate weaknesses, but the reasoning category currently contains only four tasks and should not be treated as a statistically robust score.
 - For meaningful comparisons, run each model multiple times, report variability, and keep task prompts and tool fixtures identical.
 - LLM-as-a-Judge should be calibrated against human-reviewed examples before being treated as reliable.
