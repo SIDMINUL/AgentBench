@@ -6,7 +6,7 @@ from app.judge import judge_run
 from app.storage import get_run, list_runs, save_run, update_run
 from app.tasks import TASKS
 
-app = FastAPI(title="AgentBench", version="0.5.0",
+app = FastAPI(title="AgentBench", version="0.6.0",
               description="A reproducible benchmark platform for LLM agents.")
 
 
