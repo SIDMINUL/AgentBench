@@ -106,15 +106,17 @@ TASK: {task["prompt"]}
 ALLOWED TOOLS: {allowed_tools}
 OBSERVATIONS SO FAR: {json.dumps(history)}
 
-Choose exactly one action. Return one JSON object and no other text.
-To call a tool, use:
+STRICT ACTION RULES:
+- If no tools are available, return a final action. Never call any tool.
+- Only call a tool explicitly listed in ALLOWED TOOLS. Never invent tools.
+- After a successful tool result, use that observation. Never repeat the same tool with identical arguments.
+- If history contains duplicate_tool_call, the call was already executed and suppressed. Do not repeat it. Use the cached result or error in history and finish or choose a different valid action.
+- If a tool returns an error, follow the task's recovery instruction using different arguments. Do not retry the same failed arguments.
+- When the observations contain all information needed, return a final answer immediately.
+- Return exactly one of these schemas:
 {{"type":"tool_call","tool":"product_lookup","arguments":{{"sku":"SKU-BLUE-02"}}}}
-To finish, use:
 {{"type":"final","answer":"your concise answer"}}
-Do not claim you called a tool unless you return a tool_call action.
-Do not invent tool results. Only use tools listed above.
-If a tool returns an error, inspect the error and decide whether another allowed tool call can recover the task.
-"""
+Do not invent tool results or claim a tool was called unless you return a tool_call action.
         response = httpx.post(
             f"{settings.ollama_base_url.rstrip('/')}/api/generate",
             json={
