@@ -389,7 +389,7 @@ def test_engine_blocks_multi_tool_final_until_all_required_lookups_succeed():
                 item["result"]["sku"]
                 for item in history if item.get("type") == "tool_result"
             }
-            if not any(item.get("type") == "final_blocked_required_tools" for item in history):
+            if not any(item.get("type") == "required_tool_calls" for item in history):
                 return {"type": "final", "answer": "SKU-BLUE-02"}
             for sku in ("SKU-BLUE-02", "SKU-RED-01"):
                 if sku not in completed:
