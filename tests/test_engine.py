@@ -169,8 +169,8 @@ def test_compare_endpoint_runs_and_saves_each_model(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "run", lambda provider, model: {
         "provider": provider, "model": model,
         "task_success_rate": 1.0 if model == "model-a" else 0.5,
-        "successful_tasks": 10 if model == "model-a" else 5,
-        "total_tasks": 10,
+        "successful_tasks": 12 if model == "model-a" else 6,
+        "total_tasks": 12,
         "average_latency_ms": 100.0 if model == "model-a" else 50.0,
         "p95_latency_ms": 120.0, "tool_calls": 1, "tool_errors": 0,
         "tool_call_success_rate": 1.0, "results": []})
