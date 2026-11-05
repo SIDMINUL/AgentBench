@@ -96,8 +96,8 @@ def test_ollama_reasoning_prompt_includes_verification_guidance(monkeypatch):
     prompt = captured["payload"]["prompt"]
 
     assert action == {"type": "final", "answer": "25"}
-    assert "fraction of the original quantity" in prompt
-    assert "recomputing it using a second simple method" in prompt
+    assert "fraction changes" in prompt
+    assert "independently check the result" in prompt
     assert "No tools are available" in prompt
 
 
