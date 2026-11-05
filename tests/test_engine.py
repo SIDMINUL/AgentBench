@@ -142,3 +142,43 @@ def test_judge_run_uses_deterministic_correctness_and_tool_scores(monkeypatch):
     )
     assert recovery["tool_use_quality"] == 3
     assert evaluation["average_overall_score"] == 4.27
+
+
+def test_repeated_successful_tool_call_is_suppressed(monkeypatch):
+    import app.engine as engine
+
+    task = next(task for task in TASKS if task["id"] == "multi_001")
+    executions = []
+    original_execute = engine.execute_tool
+
+    def counting_execute(tool_name, arguments):
+        executions.append((tool_name, arguments.copy()))
+        return original_execute(tool_name, arguments)
+
+    monkeypatch.setattr(engine, "execute_tool", counting_execute)
+
+    class RepeatingProvider:
+        def next_action(self, task, history, model):
+            return {
+                "type": "tool_call",
+                "tool": "product_lookup",
+                "arguments": {"sku": "SKU-BLUE-02"},
+            }
+
+    result = run_task(task, RepeatingProvider(), "mock", "repeater")
+
+    assert result["success"] is False
+    assert result["status"] == "repeated_action"
+    assert result["tool_calls"] == 2
+    assert result["duplicate_tool_calls"] == 1
+    assert len(executions) == 1
+    assert result["trace"][-1]["type"] == "tool_call_duplicate"
+
+
+def test_recovery_task_still_allows_different_tool_arguments():
+    task = next(task for task in TASKS if task["id"] == "recovery_001")
+    result = run_task(task, MockProvider(), "mock", "mock-agent")
+
+    assert result["success"] is True
+    assert result["tool_calls"] == 2
+    assert result["duplicate_tool_calls"] == 0
