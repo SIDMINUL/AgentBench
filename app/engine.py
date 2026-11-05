@@ -43,9 +43,10 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                     recovery_completed = any(
                         item.get("type") == "tool_result"
                         and item.get("tool") == required_tool
-                        and item.get("result", {}).get(
-                            next(iter(required_arguments)), None
-                        ) == next(iter(required_arguments.values()))
+                        and all(
+                            item.get("result", {}).get(key) == value
+                            for key, value in required_arguments.items()
+                        )
                         for item in history
                     )
                 if recovery and has_tool_error and not recovery_completed:
