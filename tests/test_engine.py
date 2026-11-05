@@ -206,3 +206,26 @@ def test_agent_can_use_duplicate_call_feedback_to_finish():
     assert result["tool_calls"] == 2
     assert result["duplicate_tool_calls"] == 1
     assert result["trace"][-1]["type"] == "final"
+
+
+
+def test_repeated_failed_tool_call_is_suppressed():
+    task = next(task for task in TASKS if task["id"] == "recovery_001")
+
+    class RepeatingFailureProvider:
+        def next_action(self, task, history, model):
+            return {
+                "type": "tool_call",
+                "tool": "product_lookup",
+                "arguments": {"sku": "SKU-MISSING-99"},
+            }
+
+    result = run_task(task, RepeatingFailureProvider(), "mock", "failure-repeater")
+
+    assert result["success"] is False
+    assert result["status"] == "repeated_action"
+    assert result["tool_calls"] == 3
+    assert result["tool_errors"] == 1
+    assert result["duplicate_tool_calls"] == 2
+    assert sum(step["type"] == "tool_call" for step in result["trace"]) == 1
+    assert result["trace"][-1]["type"] == "tool_call_duplicate"
