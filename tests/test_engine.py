@@ -7,7 +7,7 @@ from app.providers import MockProvider
 
 def test_mock_benchmark_passes_all_tasks():
     result = run("mock", "mock-agent")
-    assert result["total_tasks"] == len(TASKS) == 10
+    assert result["total_tasks"] == len(TASKS) == 12
     assert result["task_success_rate"] == 1.0
     assert result["successful_tasks"] == 10
 
@@ -27,7 +27,7 @@ def test_benchmark_reports_category_level_metrics():
     }
     assert result["category_metrics"]["planning"]["total_tasks"] == 2
     assert result["category_metrics"]["tool_use"]["successful_tasks"] == 3
-    assert result["category_metrics"]["failure_recovery"]["task_success_rate"] == 1.0
+    assert result["category_metrics"]["failure_recovery"] == {\n        "total_tasks": 3, "successful_tasks": 3, "task_success_rate": 1.0\n    }
 
 
 def test_ollama_recovery_prompt_requires_fallback_lookup(monkeypatch):
@@ -221,7 +221,7 @@ def test_judge_run_uses_deterministic_correctness_and_tool_scores(monkeypatch):
         if item["task_id"] == "recovery_001"
     )
     assert recovery["tool_use_quality"] == 3
-    assert evaluation["average_overall_score"] == 4.27
+    assert evaluation["average_overall_score"] == 4.28
 
 
 def test_repeated_successful_tool_call_is_suppressed(monkeypatch):
@@ -336,3 +336,44 @@ def test_duplicate_call_replays_cached_result_as_normal_observation():
     assert result["success"] is True
     assert result["duplicate_tool_calls"] == 1
 
+def test_all_failure_recovery_fixtures_pass_with_mock_provider():
+    recovery_tasks = [task for task in TASKS if task["category"] == "failure_recovery"]
+    assert len(recovery_tasks) == 3
+    for task in recovery_tasks:
+        result = run_task(task, MockProvider(), "mock", "mock-agent")
+        assert result["success"] is True
+        assert result["tool_errors"] == 1
+        assert result["tool_calls"] == 2
+        assert result["trace"][-1]["type"] == "final"
+
+
+def test_engine_blocks_final_until_required_recovery_succeeds():
+    task = next(task for task in TASKS if task["id"] == "recovery_001")
+
+    class PrematureFinalProvider:
+        def next_action(self, task, history, model):
+            if not history:
+                return {
+                    "type": "tool_call",
+                    "tool": "product_lookup",
+                    "arguments": {"sku": "SKU-MISSING-99"},
+                }
+            if any(item.get("type") == "recovery_required" for item in history):
+                if not any(
+                    item.get("type") == "tool_result"
+                    and item.get("result", {}).get("sku") == "SKU-RED-01"
+                    for item in history
+                ):
+                    return {
+                        "type": "tool_call",
+                        "tool": "product_lookup",
+                        "arguments": {"sku": "SKU-RED-01"},
+                    }
+                return {"type": "final", "answer": "AVAILABLE"}
+            return {"type": "final", "answer": "OUT_OF_STOCK"}
+
+    result = run_task(task, PrematureFinalProvider(), "mock", "guard-test")
+    assert result["success"] is True
+    assert any(step["type"] == "final_blocked_recovery" for step in result["trace"])
+    assert result["trace"][-1]["type"] == "final"
+\n
