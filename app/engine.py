@@ -19,7 +19,7 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
     tool_calls = 0
     tool_errors = 0
     duplicate_tool_calls = 0
-    successful_tool_results = {}
+    tool_call_cache = {}
     output = ""
     error = None
     success = False
@@ -54,38 +54,53 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
             if not isinstance(arguments, dict):
                 raise ValueError("Tool arguments must be an object")
 
-            # Do not execute an identical successful tool call more than once.
-            # This also catches non-consecutive loops such as A -> B -> A.
-            signature = (tool_name, json.dumps(arguments, sort_keys=True, separators=(",", ":")) )
-            if signature in successful_tool_results:
+            # Cache both successful and failed executions. Repeating an identical
+            # call cannot change a deterministic tool result and often signals a loop.
+            signature = (
+                tool_name,
+                json.dumps(arguments, sort_keys=True, separators=(",", ":")),
+            )
+            if signature in tool_call_cache:
                 duplicate_tool_calls += 1
-                previous_result = successful_tool_results[signature]
+                cached = tool_call_cache[signature]
                 message = (
-                    "Repeated tool call suppressed. The same tool and arguments "
-                    "already succeeded; use the previous result and return a final answer."
+                    "Repeated tool call suppressed. This exact tool call was already "
+                    "executed. Use the cached observation in history and choose a "
+                    "different next action or return a final answer."
                 )
-                history.append({
+                duplicate_event = {
                     "type": "duplicate_tool_call",
                     "tool": tool_name,
                     "arguments": arguments,
-                    "previous_result": previous_result,
+                    "cached_success": cached["success"],
                     "message": message,
-                })
-                trace.append({
+                }
+                if cached["success"]:
+                    duplicate_event["previous_result"] = cached["result"]
+                else:
+                    duplicate_event["previous_error"] = cached["error"]
+                history.append(duplicate_event)
+
+                trace_event = {
                     "step": step_number,
                     "type": "tool_call_duplicate",
                     "tool": tool_name,
                     "arguments": arguments,
-                    "previous_result": previous_result,
                     "success": False,
                     "message": message,
-                })
-                # Give the model one opportunity to use the cached result.
-                # If it repeats the same action again, stop the loop safely.
+                }
+                if cached["success"]:
+                    trace_event["previous_result"] = cached["result"]
+                else:
+                    trace_event["previous_error"] = cached["error"]
+                trace.append(trace_event)
+
+                # One suppressed repeat gives the model a chance to recover.
+                # A second repeat ends the task rather than wasting more steps.
                 if duplicate_tool_calls >= 2:
                     status = "repeated_action"
                     error = (
-                        "Agent repeated an already-successful tool call twice; "
+                        "Agent repeated an already-executed tool call twice; "
                         "execution stopped to prevent an infinite action loop."
                     )
                     trace[-1]["message"] = error
@@ -95,7 +110,7 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
 
             try:
                 result = execute_tool(tool_name, arguments)
-                successful_tool_results[signature] = result
+                tool_call_cache[signature] = {"success": True, "result": result}
                 history.append({"type": "tool_result", "tool": tool_name, "result": result})
                 trace.append({
                     "step": step_number,
@@ -107,6 +122,7 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                 })
             except Exception as tool_exc:
                 tool_errors += 1
+                tool_call_cache[signature] = {"success": False, "error": str(tool_exc)}
                 history.append({"type": "tool_error", "tool": tool_name, "error": str(tool_exc)})
                 trace.append({
                     "step": step_number,
