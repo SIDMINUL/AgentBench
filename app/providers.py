@@ -104,6 +104,17 @@ class OllamaProvider:
             item for item in history
             if item.get("type") in {"tool_result", "tool_error"}
         ]
+        recovery_guidance = ""
+        if any(item.get("type") == "tool_error" for item in history):
+            recovery_guidance = """
+FAILURE-RECOVERY RULES:
+- A tool_error means the requested information was NOT retrieved. It does not tell you the product's stock or availability.
+- Never infer a stock value, product status, or final answer from a failed lookup.
+- Read the task instructions again and perform the specified recovery action using a different, valid argument.
+- If the task names a fallback lookup, you MUST make that tool_call before giving a final answer.
+- After the fallback tool_result arrives, base your final answer only on the returned fields and the task's condition.
+- Do not return a final answer while a required recovery lookup is still outstanding.
+"""
         reasoning_guidance = ""
         if not task.get("tools"):
             reasoning_guidance = """
@@ -123,6 +134,7 @@ ALLOWED TOOLS: {allowed_tools}
 TOOL OBSERVATIONS (authoritative; use these instead of repeating calls): {json.dumps(tool_observations)}
 FULL ACTION HISTORY: {json.dumps(history)}
 {reasoning_guidance}
+{recovery_guidance}
 
 STRICT ACTION RULES:
 - If no tools are available, return a final action. Never call any tool.
