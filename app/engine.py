@@ -81,6 +81,25 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                     duplicate_event["previous_error"] = cached["error"]
                 history.append(duplicate_event)
 
+                # Replay the cached observation in the same shape as a normal
+                # tool response. Smaller models often fail to interpret custom
+                # duplicate-event metadata, but reliably consume tool_result /
+                # tool_error observations.
+                if cached["success"]:
+                    history.append({
+                        "type": "tool_result",
+                        "tool": tool_name,
+                        "result": cached["result"],
+                        "replayed": True,
+                    })
+                else:
+                    history.append({
+                        "type": "tool_error",
+                        "tool": tool_name,
+                        "error": cached["error"],
+                        "replayed": True,
+                    })
+
                 trace_event = {
                     "step": step_number,
                     "type": "tool_call_duplicate",
