@@ -68,27 +68,34 @@ class MockProvider:
             winner = max(stock_by_sku, key=stock_by_sku.get)
             return {"type": "final", "answer": winner}
 
-        if task_id == "recovery_001":
+        if task.get("category") == "failure_recovery":
+            initial = task["initial_lookup"]
+            recovery = task["required_recovery"]
+            initial_sku = initial["arguments"]["sku"]
+            recovery_sku = recovery["arguments"]["sku"]
             if not tool_errors and not looked_up:
                 return {
                     "type": "tool_call",
-                    "tool": "product_lookup",
-                    "arguments": {"sku": "SKU-MISSING-99"},
+                    "tool": initial["tool"],
+                    "arguments": initial["arguments"],
                 }
-            if "SKU-RED-01" not in looked_up:
+            if recovery_sku not in looked_up:
                 return {
                     "type": "tool_call",
-                    "tool": "product_lookup",
-                    "arguments": {"sku": "SKU-RED-01"},
+                    "tool": recovery["tool"],
+                    "arguments": recovery["arguments"],
                 }
             recovered = next(
                 item["result"] for item in reversed(tool_results)
-                if item["result"]["sku"] == "SKU-RED-01"
+                if item["result"]["sku"] == recovery_sku
             )
-            return {
-                "type": "final",
-                "answer": "AVAILABLE" if recovered["stock"] > 0 else "OUT_OF_STOCK",
-            }
+            if task_id == "recovery_001":
+                answer = "AVAILABLE" if recovered["stock"] > 0 else "OUT_OF_STOCK"
+            elif task_id == "recovery_002":
+                answer = "REORDER" if recovered["stock"] < 10 else "STOCK_OK"
+            else:
+                answer = "STOCK_OK" if recovered["stock"] >= 10 else "REORDER"
+            return {"type": "final", "answer": answer}
 
         return {"type": "final", "answer": ""}
 
@@ -127,9 +134,15 @@ REASONING AND VERIFICATION RULES:
 - Check the result once by recomputing it using a second simple method.
 - Return only the exact requested answer format. Do not include workings unless asked.
 """
+        recovery_requirement = task.get("required_recovery")
+        recovery_requirement_text = (
+            json.dumps(recovery_requirement)
+            if recovery_requirement else "None"
+        )
         prompt = f"""
 You are a reliable agent completing one benchmark task.
 TASK: {task["prompt"]}
+REQUIRED RECOVERY ACTION AFTER A TOOL ERROR: {recovery_requirement_text}
 ALLOWED TOOLS: {allowed_tools}
 TOOL OBSERVATIONS (authoritative; use these instead of repeating calls): {json.dumps(tool_observations)}
 FULL ACTION HISTORY: {json.dumps(history)}
