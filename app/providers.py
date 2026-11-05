@@ -139,21 +139,51 @@ REASONING AND VERIFICATION RULES:
             json.dumps(recovery_requirement)
             if recovery_requirement else "None"
         )
+        required_tool_calls = task.get("required_tool_calls", [])
+        completed_tool_calls = [
+            item for item in history if item.get("type") == "tool_result"
+        ]
+        pending_tool_calls = [
+            requirement for requirement in required_tool_calls
+            if not any(
+                item.get("tool") == requirement["tool"]
+                and all(
+                    item.get("result", {}).get(key) == value
+                    for key, value in requirement["arguments"].items()
+                )
+                for item in completed_tool_calls
+            )
+        ]
+        required_tool_calls_text = (
+            json.dumps(pending_tool_calls) if pending_tool_calls else "None"
+        )
+        multi_tool_guidance = ""
+        if required_tool_calls:
+            multi_tool_guidance = """
+MULTI-STEP TOOL REQUIREMENTS:
+- Complete every listed required tool call; one successful lookup is not enough.
+- After each result, make the next outstanding lookup.
+- Compare actual returned values only after all required observations are available.
+- Do not guess missing values or return a final answer early.
+"""
         prompt = f"""
 You are a reliable agent completing one benchmark task.
 TASK: {task["prompt"]}
 REQUIRED RECOVERY ACTION AFTER A TOOL ERROR: {recovery_requirement_text}
+REQUIRED TOOL CALLS STILL OUTSTANDING: {required_tool_calls_text}
 ALLOWED TOOLS: {allowed_tools}
 TOOL OBSERVATIONS (authoritative; use these instead of repeating calls): {json.dumps(tool_observations)}
 FULL ACTION HISTORY: {json.dumps(history)}
 {reasoning_guidance}
 {recovery_guidance}
+{multi_tool_guidance}
 
 STRICT ACTION RULES:
 - If no tools are available, return a final action. Never call any tool.
 - Only call a tool explicitly listed in ALLOWED TOOLS. Never invent tools.
 - A tool_result already contains the answer from that tool. Read its result fields and reason from them.
-- If a tool observation answers the task, return a final action now. Do not call the tool again.
+- If a tool observation answers the task, return a final action now unless REQUIRED TOOL CALLS STILL OUTSTANDING lists more calls.
+- If required tool calls are outstanding, execute the next listed call before returning a final action.
 - If an observation has "replayed": true, it is the cached result of an earlier call. Treat it exactly like a normal tool_result or tool_error, and do not retry it.
 - Never repeat a tool call with identical arguments, even if the previous call was suppressed.
 - If a tool returns an error, follow the task's recovery instruction using different arguments. Do not retry the same failed arguments.
