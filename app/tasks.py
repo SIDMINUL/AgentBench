@@ -68,8 +68,12 @@ TASKS = [
         "category": "tool_use",
         "prompt": "Use product_lookup for both SKU-BLUE-02 and SKU-RED-01. Which SKU has more stock? Reply with the SKU only.",
         "expected": "SKU-RED-01",
+        "required_tool_calls": [
+            {"tool": "product_lookup", "arguments": {"sku": "SKU-BLUE-02"}},
+            {"tool": "product_lookup", "arguments": {"sku": "SKU-RED-01"}},
+        ],
         "tools": ["product_lookup"],
-        "max_steps": 5,
+        "max_steps": 6,
     },
     {
         "id": "recovery_001",
