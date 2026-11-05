@@ -7,7 +7,7 @@ A reproducible platform for evaluating LLM agents on reasoning, planning, multi-
 - Mock and Ollama model providers
 - Multi-step agent execution with per-task tool allowlists
 - Execution traces containing tool arguments, observations, errors, and final answers
-- Deterministic exact-match task success, tool-call success, average latency, and p95 latency
+- Deterministic exact-match task success, category-level success rates, tool-call success, average latency, and p95 latency
 - 10 benchmark tasks across reasoning, planning, tool use, and failure recovery
 - FastAPI API and Streamlit dashboard
 - SQLite persistence for CLI and API benchmark runs
@@ -25,7 +25,7 @@ A reproducible platform for evaluating LLM agents on reasoning, planning, multi-
 | Failure recovery | 1 | Handling a failed tool call and recovering with a valid lookup |
 | **Total** | **10** | |
 
-The benchmark uses a small deterministic inventory tool with known fixture data. The failure-recovery task intentionally requests an unknown SKU before recovering with a valid lookup.
+The benchmark uses a small deterministic inventory tool with known fixture data. The failure-recovery task intentionally requests an unknown SKU before recovering with a valid lookup. Run summaries also report success rates separately for reasoning, planning, tool use, and failure recovery.
 
 ## Quick start
 
@@ -101,6 +101,8 @@ Runs are saved to `data/agentbench.db` by default. Set `AGENTBENCH_DB_PATH` to c
 - Exact-match scoring can mark semantically correct but differently phrased answers as incorrect.
 - The inventory tool uses fixed fixture data; it does not connect to a live commerce system.
 - Latency depends on local hardware, model size, warm-up state, and Ollama configuration.
+- The Ollama prompt provides arithmetic and answer-verification guidance for tasks without tools; this is prompt guidance, not a guarantee of correct reasoning.
+- Category-level metrics help isolate weaknesses, but the reasoning category currently contains only four tasks and should not be treated as a statistically robust score.
 - For meaningful comparisons, run each model multiple times, report variability, and keep task prompts and tool fixtures identical.
 - LLM-as-a-Judge should be calibrated against human-reviewed examples before being treated as reliable.
 
