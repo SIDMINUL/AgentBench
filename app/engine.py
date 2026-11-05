@@ -17,6 +17,8 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
     trace = []
     tool_calls = 0
     tool_errors = 0
+    duplicate_tool_calls = 0
+    successful_tool_results = {}
     output = ""
     error = None
     success = False
@@ -50,8 +52,40 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
             arguments = action.get("arguments", {})
             if not isinstance(arguments, dict):
                 raise ValueError("Tool arguments must be an object")
+
+            # Do not execute an identical successful tool call more than once.
+            # This also catches non-consecutive loops such as A -> B -> A.
+            signature = (tool_name, repr(sorted(arguments.items())))
+            if signature in successful_tool_results:
+                duplicate_tool_calls += 1
+                previous_result = successful_tool_results[signature]
+                message = (
+                    "Repeated tool call suppressed. The same tool and arguments "
+                    "already succeeded; use the previous result and return a final answer."
+                )
+                history.append({
+                    "type": "duplicate_tool_call",
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "previous_result": previous_result,
+                    "message": message,
+                })
+                trace.append({
+                    "step": step_number,
+                    "type": "tool_call_duplicate",
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "previous_result": previous_result,
+                    "success": False,
+                    "message": message,
+                })
+                status = "repeated_action"
+                error = message
+                break
+
             try:
                 result = execute_tool(tool_name, arguments)
+                successful_tool_results[signature] = result
                 history.append({"type": "tool_result", "tool": tool_name, "result": result})
                 trace.append({
                     "step": step_number,
@@ -89,6 +123,7 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
         "latency_ms": latency_ms,
         "tool_calls": tool_calls,
         "tool_errors": tool_errors,
+        "duplicate_tool_calls": duplicate_tool_calls,
         "error": error,
         "trace": trace,
     }
@@ -101,6 +136,7 @@ def run(provider_name: str = "mock", model: str = "mock-agent") -> dict:
     passed = sum(item["success"] for item in results)
     tool_calls = sum(item["tool_calls"] for item in results)
     tool_errors = sum(item["tool_errors"] for item in results)
+    duplicate_tool_calls = sum(item["duplicate_tool_calls"] for item in results)
     p95 = latencies[max(0, math.ceil(0.95 * total) - 1)] if total else 0.0
 
     return {
@@ -111,6 +147,7 @@ def run(provider_name: str = "mock", model: str = "mock-agent") -> dict:
         "task_success_rate": passed / total if total else 0.0,
         "tool_calls": tool_calls,
         "tool_errors": tool_errors,
+        "duplicate_tool_calls": duplicate_tool_calls,
         "tool_call_success_rate": (tool_calls - tool_errors) / tool_calls if tool_calls else 1.0,
         "average_latency_ms": mean(latencies) if latencies else 0.0,
         "p95_latency_ms": p95,
