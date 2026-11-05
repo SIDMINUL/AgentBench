@@ -104,12 +104,25 @@ class OllamaProvider:
             item for item in history
             if item.get("type") in {"tool_result", "tool_error"}
         ]
+        reasoning_guidance = ""
+        if not task.get("tools"):
+            reasoning_guidance = """
+REASONING AND VERIFICATION RULES:
+- Solve the task carefully before producing the final answer. Do not guess or rush.
+- For arithmetic, identify the starting quantity and apply each operation in the order stated.
+- For fractions, calculate the fraction of the original quantity before applying later changes.
+- For elapsed-time problems, add each duration sequentially to the start time; convert minutes past 60 into the next hour.
+- For relational logic, translate each comparison into an ordering before selecting the answer.
+- Check the result once by recomputing it using a second simple method.
+- Return only the exact requested answer format. Do not include workings unless asked.
+"""
         prompt = f"""
-You are an agent completing one benchmark task.
+You are a reliable agent completing one benchmark task.
 TASK: {task["prompt"]}
 ALLOWED TOOLS: {allowed_tools}
 TOOL OBSERVATIONS (authoritative; use these instead of repeating calls): {json.dumps(tool_observations)}
 FULL ACTION HISTORY: {json.dumps(history)}
+{reasoning_guidance}
 
 STRICT ACTION RULES:
 - If no tools are available, return a final action. Never call any tool.
