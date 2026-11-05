@@ -378,3 +378,65 @@ def test_engine_blocks_final_until_required_recovery_succeeds():
     assert result["success"] is True
     assert any(step["type"] == "final_blocked_recovery" for step in result["trace"])
     assert result["trace"][-1]["type"] == "final"
+
+
+def test_engine_blocks_multi_tool_final_until_all_required_lookups_succeed():
+    task = next(task for task in TASKS if task["id"] == "multi_003")
+
+    class EarlyFinalProvider:
+        def next_action(self, task, history, model):
+            completed = {
+                item["result"]["sku"]
+                for item in history if item.get("type") == "tool_result"
+            }
+            if not any(item.get("type") == "final_blocked_required_tools" for item in history):
+                return {"type": "final", "answer": "SKU-BLUE-02"}
+            for sku in ("SKU-BLUE-02", "SKU-RED-01"):
+                if sku not in completed:
+                    return {
+                        "type": "tool_call",
+                        "tool": "product_lookup",
+                        "arguments": {"sku": sku},
+                    }
+            return {"type": "final", "answer": "SKU-RED-01"}
+
+    result = run_task(task, EarlyFinalProvider(), "mock", "multi-tool-guard")
+    assert result["success"] is True
+    assert result["tool_calls"] == 2
+    assert any(
+        item["type"] == "final_blocked_required_tools"
+        for item in result["trace"]
+    )
+    assert result["trace"][-1]["type"] == "final"
+
+
+def test_ollama_prompt_lists_outstanding_required_tool_calls(monkeypatch):
+    import json
+    from app.providers import OllamaProvider
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"response": json.dumps({
+                "type": "tool_call",
+                "tool": "product_lookup",
+                "arguments": {"sku": "SKU-BLUE-02"},
+            })}
+
+    def fake_post(url, json=None, timeout=None):
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+    task = next(task for task in TASKS if task["id"] == "multi_003")
+    OllamaProvider().next_action(task, [], "test-model")
+    prompt = captured["payload"]["prompt"]
+
+    assert "SKU-BLUE-02" in prompt
+    assert "SKU-RED-01" in prompt
+    assert "Complete every listed required tool call" in prompt
+    assert "Do not guess missing values" in prompt
