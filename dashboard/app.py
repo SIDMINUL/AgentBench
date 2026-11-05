@@ -48,7 +48,18 @@ if st.button("Compare models"):
             response.raise_for_status()
             comparison = response.json()
             st.success(f'{comparison["comparison_count"]} model runs completed and saved.')
-            df = pd.DataFrame(comparison["ranking"])
+            comparison_rows = []
+            for item in comparison["ranking"]:
+                row = dict(item)
+                category_metrics = row.pop("category_metrics", {})
+                for category in ("reasoning", "planning", "tool_use", "failure_recovery"):
+                    metric = category_metrics.get(category, {})
+                    row[f"{category}_success"] = (
+                        f'{metric.get("successful_tasks", 0)}/{metric.get("total_tasks", 0)}'
+                    )
+                    row[f"{category}_rate"] = f'{metric.get("task_success_rate", 0.0):.1%}'
+                comparison_rows.append(row)
+            df = pd.DataFrame(comparison_rows)
             df["task_success_rate"] = df["task_success_rate"].map(lambda value: f"{value:.1%}")
             df["tool_call_success_rate"] = df["tool_call_success_rate"].map(lambda value: f"{value:.1%}")
             st.dataframe(df, use_container_width=True, hide_index=True)
