@@ -597,35 +597,42 @@ def test_ollama_multi_tool_prompt_explains_numeric_comparison(monkeypatch):
 
 
 
-def test_reasoning_answer_gets_independent_verification_pass(monkeypatch):
-    import json
-    from app.providers import OllamaProvider
 
-    payloads = []
-    responses = [
-        {"response": json.dumps({"type": "final", "answer": "7"})},
-        {"response": json.dumps({"answer": "10"})},
-    ]
 
-    class FakeResponse:
-        def __init__(self, body):
-            self.body = body
+def test_independent_verifier_reports_candidate_and_suggested_correction():
+    from app.engine import run_task
 
-        def raise_for_status(self):
-            pass
+    class WrongAnswerProvider:
+        def next_action(self, task, history, model):
+            return {"type": "final", "answer": "7"}
 
-        def json(self):
-            return self.body
-
-    def fake_post(url, json=None, timeout=None):
-        payloads.append(json)
-        return FakeResponse(responses.pop(0))
-
-    monkeypatch.setattr("app.providers.httpx.post", fake_post)
     task = next(task for task in TASKS if task["id"] == "logic_001")
-    action = OllamaProvider().next_action(task, [], "test-model")
+    result = run_task(task, WrongAnswerProvider(), "mock", "wrong-answer")
+    assert result["output"] == "7"
+    assert result["raw_output"] == "7"
+    assert result["success"] is False
+    assert result["verification"]["reference_output"] == "10"
+    assert result["verification"]["candidate_correct"] is False
+    assert result["verification"]["correction_suggested"] == "10"
+    assert result["verification"]["correction_applied"] is False
 
-    assert action == {"type": "final", "answer": "10"}
-    assert len(payloads) == 2
-    assert "CANDIDATE ANSWER: 7" in payloads[1]["prompt"]
-    assert "Solve the task from scratch" in payloads[1]["prompt"]
+
+def test_independent_verifier_recalculates_fraction_and_time():
+    from app.engine import _independent_verification
+
+    fraction_task = next(task for task in TASKS if task["id"] == "math_002")
+    time_task = next(task for task in TASKS if task["id"] == "planning_002")
+    fraction = _independent_verification(fraction_task, "21")
+    elapsed = _independent_verification(time_task, "10:20")
+    assert fraction["reference_output"] == "25"
+    assert fraction["correction_suggested"] == "25"
+    assert elapsed["reference_output"] == "10:10"
+    assert elapsed["correction_suggested"] == "10:10"
+
+
+def test_run_reports_independent_verification_coverage():
+    result = run("mock", "mock-agent")
+    assert result["verification_metrics"]["supported_tasks"] == 3
+    assert result["verification_metrics"]["raw_correct"] == 3
+    assert result["verification_metrics"]["raw_accuracy"] == 1.0
+    assert result["verification_metrics"]["correction_applied"] is False
