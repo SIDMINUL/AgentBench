@@ -5,7 +5,7 @@ A reproducible platform for evaluating LLM agents on reasoning, planning, multi-
 ## Features
 
 - Mock and Ollama model providers
-- Multi-step agent execution with per-task tool allowlists
+- Multi-step agent execution with per-task tool allowlists and required-observation guards
 - Execution traces containing tool arguments, observations, errors, and final answers
 - Deterministic exact-match task success, category-level success rates, tool-call success, average latency, and p95 latency
 - 12 benchmark tasks across reasoning, planning, tool use, and three failure-recovery scenarios
@@ -25,7 +25,7 @@ A reproducible platform for evaluating LLM agents on reasoning, planning, multi-
 | Failure recovery | 3 | Recovering from invalid SKUs using different fallback products and stock conditions |
 | **Total** | **12** | |
 
-The benchmark uses a small deterministic inventory tool with known fixture data. Three failure-recovery tasks intentionally request unknown SKUs and require different valid fallback lookups. The execution engine blocks premature final answers until a task's declared recovery lookup succeeds. Run summaries report success rates separately for reasoning, planning, tool use, and failure recovery.
+The benchmark uses a small deterministic inventory tool with known fixture data. Three failure-recovery tasks intentionally request unknown SKUs and require different valid fallback lookups. The execution engine blocks premature final answers until declared required tool observations (including both lookups in the multi-product comparison) and any required recovery lookup have succeeded. Run summaries report success rates separately for reasoning, planning, tool use, and failure recovery.
 
 ## Quick start
 
