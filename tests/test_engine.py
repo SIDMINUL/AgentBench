@@ -50,7 +50,7 @@ def test_ollama_recovery_prompt_requires_fallback_lookup(monkeypatch):
             })}
 
     def fake_post(url, json=None, timeout=None):
-        captured["payload"] = json
+        captured.setdefault("payload", json)
         return FakeResponse()
 
     monkeypatch.setattr("app.providers.httpx.post", fake_post)
@@ -87,7 +87,7 @@ def test_ollama_reasoning_prompt_includes_verification_guidance(monkeypatch):
             return {"response": json.dumps({"type": "final", "answer": "25"})}
 
     def fake_post(url, json=None, timeout=None):
-        captured["payload"] = json
+        captured.setdefault("payload", json)
         return FakeResponse()
 
     monkeypatch.setattr("app.providers.httpx.post", fake_post)
@@ -425,7 +425,7 @@ def test_ollama_tool_prompt_explains_numeric_thresholds(monkeypatch):
             return { "response": json.dumps({"type": "final", "answer": "REORDER"}) }
 
     def fake_post(url, json=None, timeout=None):
-        captured["payload"] = json
+        captured.setdefault("payload", json)
         return FakeResponse()
 
     monkeypatch.setattr("app.providers.httpx.post", fake_post)
@@ -462,7 +462,7 @@ def test_ollama_prompt_forces_final_after_observations_complete(monkeypatch):
             return {"response": json.dumps({"type": "final", "answer": "REORDER"})}
 
     def fake_post(url, json=None, timeout=None):
-        captured["payload"] = json
+        captured.setdefault("payload", json)
         return FakeResponse()
 
     monkeypatch.setattr("app.providers.httpx.post", fake_post)
@@ -506,7 +506,7 @@ def test_ollama_prompt_lists_outstanding_required_tool_calls(monkeypatch):
             })}
 
     def fake_post(url, json=None, timeout=None):
-        captured["payload"] = json
+        captured.setdefault("payload", json)
         return FakeResponse()
 
     monkeypatch.setattr("app.providers.httpx.post", fake_post)
@@ -535,7 +535,7 @@ def test_ollama_reasoning_prompt_has_explicit_count_fraction_and_time_checks(mon
             return {"response": json.dumps({"type": "final", "answer": "10"})}
 
     def fake_post(url, json=None, timeout=None):
-        captured["payload"] = json
+        captured.setdefault("payload", json)
         return FakeResponse()
 
     monkeypatch.setattr("app.providers.httpx.post", fake_post)
@@ -575,7 +575,7 @@ def test_ollama_multi_tool_prompt_explains_numeric_comparison(monkeypatch):
             return {"response": json.dumps({"type": "final", "answer": "SKU-RED-01"})}
 
     def fake_post(url, json=None, timeout=None):
-        captured["payload"] = json
+        captured.setdefault("payload", json)
         return FakeResponse()
 
     monkeypatch.setattr("app.providers.httpx.post", fake_post)
@@ -594,3 +594,38 @@ def test_ollama_multi_tool_prompt_explains_numeric_comparison(monkeypatch):
     assert "Read the numeric stock field from BOTH successful" in prompt
     assert "27 > 4" in prompt
     assert "Do not select the first SKU" in prompt
+
+
+
+def test_reasoning_answer_gets_independent_verification_pass(monkeypatch):
+    import json
+    from app.providers import OllamaProvider
+
+    payloads = []
+    responses = [
+        {"response": json.dumps({"type": "final", "answer": "7"})},
+        {"response": json.dumps({"answer": "10"})},
+    ]
+
+    class FakeResponse:
+        def __init__(self, body):
+            self.body = body
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.body
+
+    def fake_post(url, json=None, timeout=None):
+        payloads.append(json)
+        return FakeResponse(responses.pop(0))
+
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+    task = next(task for task in TASKS if task["id"] == "logic_001")
+    action = OllamaProvider().next_action(task, [], "test-model")
+
+    assert action == {"type": "final", "answer": "10"}
+    assert len(payloads) == 2
+    assert "CANDIDATE ANSWER: 7" in payloads[1]["prompt"]
+    assert "Solve the task from scratch" in payloads[1]["prompt"]
