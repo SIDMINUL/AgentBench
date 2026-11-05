@@ -100,17 +100,24 @@ class OllamaProvider:
             if "product_lookup" in task.get("tools", [])
             else "No tools are available for this task."
         )
+        tool_observations = [
+            item for item in history
+            if item.get("type") in {"tool_result", "tool_error"}
+        ]
         prompt = f"""
 You are an agent completing one benchmark task.
 TASK: {task["prompt"]}
 ALLOWED TOOLS: {allowed_tools}
-OBSERVATIONS SO FAR: {json.dumps(history)}
+TOOL OBSERVATIONS (authoritative; use these instead of repeating calls): {json.dumps(tool_observations)}
+FULL ACTION HISTORY: {json.dumps(history)}
 
 STRICT ACTION RULES:
 - If no tools are available, return a final action. Never call any tool.
 - Only call a tool explicitly listed in ALLOWED TOOLS. Never invent tools.
-- After a successful tool result, use that observation. Never repeat the same tool with identical arguments.
-- If history contains duplicate_tool_call, the call was already executed and suppressed. Do not repeat it. Use the cached result or error in history and finish or choose a different valid action.
+- A tool_result already contains the answer from that tool. Read its result fields and reason from them.
+- If a tool observation answers the task, return a final action now. Do not call the tool again.
+- If an observation has "replayed": true, it is the cached result of an earlier call. Treat it exactly like a normal tool_result or tool_error, and do not retry it.
+- Never repeat a tool call with identical arguments, even if the previous call was suppressed.
 - If a tool returns an error, follow the task's recovery instruction using different arguments. Do not retry the same failed arguments.
 - When the observations contain all information needed, return a final answer immediately.
 - Return exactly one of these schemas:
