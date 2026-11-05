@@ -8,7 +8,7 @@ A reproducible platform for evaluating LLM agents on reasoning, planning, multi-
 - Multi-step agent execution with per-task tool allowlists
 - Execution traces containing tool arguments, observations, errors, and final answers
 - Deterministic exact-match task success, category-level success rates, tool-call success, average latency, and p95 latency
-- 10 benchmark tasks across reasoning, planning, tool use, and failure recovery
+- 12 benchmark tasks across reasoning, planning, tool use, and three failure-recovery scenarios
 - FastAPI API and Streamlit dashboard
 - SQLite persistence for CLI and API benchmark runs
 - Multi-model comparison using identical task sets
@@ -25,7 +25,7 @@ A reproducible platform for evaluating LLM agents on reasoning, planning, multi-
 | Failure recovery | 1 | Handling a failed tool call and recovering with a valid lookup |
 | **Total** | **10** | |
 
-The benchmark uses a small deterministic inventory tool with known fixture data. The failure-recovery task intentionally requests an unknown SKU before recovering with a valid lookup. Run summaries also report success rates separately for reasoning, planning, tool use, and failure recovery.
+The benchmark uses a small deterministic inventory tool with known fixture data. Three failure-recovery tasks intentionally request unknown SKUs and require different valid fallback lookups. The execution engine blocks premature final answers until a task's declared recovery lookup succeeds. Run summaries report success rates separately for reasoning, planning, tool use, and failure recovery.
 
 ## Quick start
 
@@ -96,7 +96,7 @@ Runs are saved to `data/agentbench.db` by default. Set `AGENTBENCH_DB_PATH` to c
 
 ## Evaluation notes and limitations
 
-- The included tasks are a compact development benchmark, not a standardized or statistically representative evaluation suite.
+- The included tasks are a compact development benchmark, not a standardized or statistically representative evaluation suite. The engine enforces explicitly declared recovery requirements; report this orchestration policy when comparing agent performance.
 - Mock results validate orchestration only, not model capability.
 - Exact-match scoring can mark semantically correct but differently phrased answers as incorrect.
 - The inventory tool uses fixed fixture data; it does not connect to a live commerce system.
