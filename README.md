@@ -22,8 +22,8 @@ A reproducible platform for evaluating LLM agents on reasoning, planning, multi-
 | Reasoning | 4 | Arithmetic, multi-step arithmetic, and relational logic |
 | Planning | 2 | Dependency ordering and time-based scheduling |
 | Tool use | 3 | Single lookup, conditional decision, and multiple tool calls |
-| Failure recovery | 1 | Handling a failed tool call and recovering with a valid lookup |
-| **Total** | **10** | |
+| Failure recovery | 3 | Recovering from invalid SKUs using different fallback products and stock conditions |
+| **Total** | **12** | |
 
 The benchmark uses a small deterministic inventory tool with known fixture data. Three failure-recovery tasks intentionally request unknown SKUs and require different valid fallback lookups. The execution engine blocks premature final answers until a task's declared recovery lookup succeeds. Run summaries report success rates separately for reasoning, planning, tool use, and failure recovery.
 
