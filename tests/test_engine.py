@@ -19,6 +19,45 @@ def test_benchmark_covers_all_task_categories():
     }
 
 
+
+def test_benchmark_reports_category_level_metrics():
+    result = run("mock", "mock-agent")
+    assert result["category_metrics"]["reasoning"] == {
+        "total_tasks": 4, "successful_tasks": 4, "task_success_rate": 1.0
+    }
+    assert result["category_metrics"]["planning"]["total_tasks"] == 2
+    assert result["category_metrics"]["tool_use"]["successful_tasks"] == 3
+    assert result["category_metrics"]["failure_recovery"]["task_success_rate"] == 1.0
+
+
+def test_ollama_reasoning_prompt_includes_verification_guidance(monkeypatch):
+    import json
+    from app.providers import OllamaProvider
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"response": json.dumps({"type": "final", "answer": "25"})}
+
+    def fake_post(url, json=None, timeout=None):
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+    task = next(task for task in TASKS if task["id"] == "math_002")
+    action = OllamaProvider().next_action(task, [], "test-model")
+    prompt = captured["payload"]["prompt"]
+
+    assert action == {"type": "final", "answer": "25"}
+    assert "fraction of the original quantity" in prompt
+    assert "recomputing it using a second simple method" in prompt
+    assert "No tools are available" in prompt
+
+
 def test_tool_task_records_execution_trace():
     task = next(task for task in TASKS if task["id"] == "multi_001")
     result = run_task(task, MockProvider(), "mock", "mock-agent")
