@@ -169,10 +169,12 @@ def test_repeated_successful_tool_call_is_suppressed(monkeypatch):
 
     assert result["success"] is False
     assert result["status"] == "repeated_action"
-    assert result["tool_calls"] == 2
-    assert result["duplicate_tool_calls"] == 1
+    assert result["tool_calls"] == 3
+    assert result["duplicate_tool_calls"] == 2
     assert len(executions) == 1
     assert result["trace"][-1]["type"] == "tool_call_duplicate"
+    assert result["status"] == "repeated_action"
+    assert "twice" in result["error"]
 
 
 def test_recovery_task_still_allows_different_tool_arguments():
@@ -182,3 +184,25 @@ def test_recovery_task_still_allows_different_tool_arguments():
     assert result["success"] is True
     assert result["tool_calls"] == 2
     assert result["duplicate_tool_calls"] == 0
+
+
+
+def test_agent_can_use_duplicate_call_feedback_to_finish():
+    task = next(task for task in TASKS if task["id"] == "multi_001")
+
+    class FeedbackAwareProvider:
+        def next_action(self, task, history, model):
+            if any(item.get("type") == "duplicate_tool_call" for item in history):
+                return {"type": "final", "answer": "REORDER"}
+            return {
+                "type": "tool_call",
+                "tool": "product_lookup",
+                "arguments": {"sku": "SKU-BLUE-02"},
+            }
+
+    result = run_task(task, FeedbackAwareProvider(), "mock", "feedback-aware")
+
+    assert result["success"] is True
+    assert result["tool_calls"] == 2
+    assert result["duplicate_tool_calls"] == 1
+    assert result["trace"][-1]["type"] == "final"
