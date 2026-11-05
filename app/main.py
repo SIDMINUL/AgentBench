@@ -59,7 +59,8 @@ def compare_models(request: CompareRequest):
                 "successful_tasks": result["successful_tasks"], "total_tasks": result["total_tasks"],
                 "average_latency_ms": result["average_latency_ms"], "p95_latency_ms": result["p95_latency_ms"],
                 "tool_calls": result["tool_calls"], "tool_errors": result["tool_errors"],
-                "tool_call_success_rate": result["tool_call_success_rate"]})
+                "tool_call_success_rate": result["tool_call_success_rate"],
+                "category_metrics": result.get("category_metrics", {})})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     ranked = sorted(comparisons, key=lambda item: (-item["task_success_rate"], item["average_latency_ms"]))
