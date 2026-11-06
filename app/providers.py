@@ -323,6 +323,7 @@ def groq_chat_completion(
     user_prompt: str,
     *,
     max_completion_tokens: int = 2048,
+    response_schema: dict | None = None,
 ) -> str:
     """Call Groq's OpenAI-compatible Chat Completions API and return message content."""
     api_key = (settings.groq_api_key or "").strip()
@@ -338,10 +339,20 @@ def groq_chat_completion(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        "response_format": {"type": "json_object"},
         "temperature": 0.1,
         "max_completion_tokens": max_completion_tokens,
     }
+    if response_schema:
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "agentbench_response",
+                "strict": True,
+                "schema": response_schema,
+            },
+        }
+    else:
+        payload["response_format"] = {"type": "json_object"}
     # These reasoning controls are documented for GPT-OSS and Qwen3.8 models.
     if model.startswith("openai/gpt-oss") or model.startswith("qwen/qwen3.8"):
         payload["reasoning_effort"] = "medium"
@@ -496,11 +507,50 @@ NEXT ACTION
 Return one tool_call if a required observation is missing. Otherwise return one final answer.
 """
 
+        can_call_product_lookup = "product_lookup" in allowed_tools
+        arguments_schema = (
+            {
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "properties": {"sku": {"type": "string"}},
+                        "required": ["sku"],
+                        "additionalProperties": False,
+                    },
+                    {"type": "null"},
+                ]
+            }
+            if can_call_product_lookup else {"type": "null"}
+        )
+        response_schema = {
+            "type": "object",
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": ["final", "tool_call"] if allowed_tools else ["final"],
+                },
+                "answer": {"type": ["string", "null"]},
+                "evidence": {"type": ["string", "null"]},
+                "tool": (
+                    {"type": ["string", "null"]}
+                    if can_call_product_lookup else {"type": "null"}
+                ),
+                "arguments": arguments_schema,
+            },
+            "required": ["type", "answer", "evidence", "tool", "arguments"],
+            "additionalProperties": False,
+        }
         raw = groq_chat_completion(
             model=model,
             system_prompt=system_prompt,
             user_prompt=prompt,
             max_completion_tokens=2048,
+            response_schema=(
+                response_schema
+                if model in {"openai/gpt-oss-120b", "openai/gpt-oss-20b",
+                             "qwen/qwen3.8-27b"}
+                else None
+            ),
         )
         try:
             action = json.loads(raw)
@@ -521,8 +571,8 @@ Return one tool_call if a required observation is missing. Otherwise return one 
         if action_type == "final":
             return {
                 "type": "final",
-                "answer": str(action.get("answer", action.get("content", ""))),
-                "evidence": str(action.get("evidence", action.get("reasoning", ""))),
+                "answer": str(action.get("answer") or action.get("content") or ""),
+                "evidence": str(action.get("evidence") or action.get("reasoning") or ""),
             }
 
         if action_type == "tool_call":
