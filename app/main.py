@@ -53,6 +53,7 @@ def health():
         "service": "AgentBench",
         "default_provider": settings.default_provider,
         "default_model": settings.default_model,
+        "groq_api_key_configured": bool(settings.groq_api_key),
     }
 
 
