@@ -11,10 +11,10 @@ st.caption(
     "benchmark history is stored by the API service."
 )
 
-api_url = st.sidebar.text_input(
-    "API URL",
-    os.getenv("AGENTBENCH_API_URL", "http://localhost:8000"),
-)
+default_api_url = os.getenv("AGENTBENCH_API_URL", "http://localhost:8000")
+if not default_api_url.startswith(("http://", "https://")):
+    default_api_url = f"http://{default_api_url}"
+api_url = st.sidebar.text_input("API URL", default_api_url)
 provider = st.sidebar.selectbox(
     "Provider",
     ["groq", "mock", "ollama"],
