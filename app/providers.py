@@ -555,10 +555,13 @@ Return one tool_call if a required observation is missing. Otherwise return one 
             system_prompt=system_prompt,
             user_prompt=prompt,
             max_completion_tokens=2048,
+            # Groq's structured-output mode is not compatible with tool use.
+            # Tool-enabled tasks return JSON actions using JSON Object Mode instead.
             response_schema=(
                 response_schema
-                if model in {"openai/gpt-oss-120b", "openai/gpt-oss-20b",
-                             "qwen/qwen3.8-27b"}
+                if not can_call_product_lookup
+                and model in {"openai/gpt-oss-120b", "openai/gpt-oss-20b",
+                              "qwen/qwen3.8-27b"}
                 else None
             ),
         )
