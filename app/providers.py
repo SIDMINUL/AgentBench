@@ -152,7 +152,10 @@ REASONING AND VERIFICATION RULES:
 - For count problems with multiple groups, add every group's quantity first to get the total; then subtract only the items explicitly removed. Do not subtract removed items from just one group unless the question asks for that group's count.
 - For fraction changes, first calculate the changed amount from the original total (total divided by the denominator for a unit fraction); subtract borrowed/removed items, then apply returns or additions in the order stated.
 - For elapsed-time problems, convert the start time to minutes after midnight, add every duration including breaks, then convert the final total back to HH:MM. Do not omit a break or round a duration.
-- For relational logic, translate each comparison into an ordering before selecting the answer.
+- For elapsed-time problems, maintain a running total after EACH duration; check that the difference between final and start time equals the sum of all durations.
+- For percentage discounts, calculate the discount amount first (price × percent ÷ 100), then subtract it from the original price. Do not return the discount amount as the sale price.
+- For proportional ratios, calculate the amount per base unit first, then multiply by the target unit count.
+- For relational logic, translate each comparison into an ordering before selecting the answer. For statements using "all" and "some", do not assume that a subset overlaps with a separate group unless the premises establish that overlap.
 - Before finalizing arithmetic, write down the numeric expression internally, evaluate it left to right, and independently check the result. Never output the working unless asked.
 - If the answer is a time, verify by adding the total elapsed minutes back to the start time.
 - Return only the exact requested answer format.
