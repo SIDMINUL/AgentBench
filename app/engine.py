@@ -52,6 +52,7 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
     tool_calls = 0
     tool_errors = 0
     duplicate_tool_calls = 0
+    answer_retry_used = False
     tool_call_cache = {}
     output = ""
     error = None
@@ -191,14 +192,36 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                     status = "running"
                     continue
 
-                output = str(action.get("answer", ""))
-                success = normalize(output) == normalize(task["expected"])
+                candidate = str(action.get("answer", ""))
+                candidate_success = normalize(candidate) == normalize(task["expected"])
+                if not candidate_success and not answer_retry_used and step_number < task.get("max_steps", 4):
+                    answer_retry_used = True
+                    feedback = (
+                        "Your proposed final answer did not pass the benchmark answer check. "
+                        "Re-read the original task and all observations, recalculate or "
+                        "re-evaluate the condition independently, and return a corrected "
+                        "final answer. Do not repeat tool calls already present in history."
+                    )
+                    history.append({"type": "answer_retry_feedback", "message": feedback})
+                    trace.append({
+                        "step": step_number,
+                        "type": "final_answer_rejected_for_retry",
+                        "answer": candidate,
+                        "success": False,
+                        "message": feedback,
+                    })
+                    status = "running"
+                    continue
+
+                output = candidate
+                success = candidate_success
                 status = "completed"
                 trace.append({
                     "step": step_number,
                     "type": "final",
                     "answer": output,
                     "success": success,
+                    "retry_used": answer_retry_used,
                 })
                 break
 
@@ -331,6 +354,7 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
         "tool_calls": tool_calls,
         "tool_errors": tool_errors,
         "duplicate_tool_calls": duplicate_tool_calls,
+        "answer_retry_used": answer_retry_used,
         "error": error,
         "trace": trace,
     }
@@ -344,6 +368,7 @@ def run(provider_name: str = "mock", model: str = "mock-agent") -> dict:
     tool_calls = sum(item["tool_calls"] for item in results)
     tool_errors = sum(item["tool_errors"] for item in results)
     duplicate_tool_calls = sum(item["duplicate_tool_calls"] for item in results)
+    answer_retries = sum(item.get("answer_retry_used", False) for item in results)
     p95 = latencies[max(0, math.ceil(0.95 * total) - 1)] if total else 0.0
 
     category_metrics = {}
@@ -383,6 +408,7 @@ def run(provider_name: str = "mock", model: str = "mock-agent") -> dict:
         "tool_calls": tool_calls,
         "tool_errors": tool_errors,
         "duplicate_tool_calls": duplicate_tool_calls,
+        "answer_retries": answer_retries,
         "tool_call_success_rate": (
             tool_calls - tool_errors - duplicate_tool_calls
         ) / tool_calls if tool_calls else 1.0,
