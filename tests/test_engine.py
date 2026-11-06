@@ -792,16 +792,18 @@ def test_groq_provider_uses_hosted_chat_api_and_structured_json(monkeypatch):
     assert response_format["type"] == "json_schema"
     assert response_format["json_schema"]["strict"] is True
     schema = response_format["json_schema"]["schema"]
-    assert len(schema["anyOf"]) == 1
-    assert schema["anyOf"][0]["properties"]["type"]["enum"] == ["final"]
+    assert schema["type"] == "object"
+    assert schema["properties"]["type"]["enum"] == ["final"]
+    assert schema["required"] == ["type", "answer", "evidence", "tool", "arguments"]
 
     tool_task = next(task for task in TASKS if task["id"] == "multi_001")
     GroqProvider().next_action(tool_task, [], "openai/gpt-oss-120b")
     tool_schema = captured["payload"]["response_format"]["json_schema"]["schema"]
-    assert len(tool_schema["anyOf"]) == 2
-    assert tool_schema["anyOf"][0]["properties"]["type"]["enum"] == ["final"]
-    assert tool_schema["anyOf"][1]["properties"]["type"]["enum"] == ["tool_call"]
-    assert tool_schema["anyOf"][1]["properties"]["tool"]["enum"] == ["product_lookup"]
+    assert tool_schema["properties"]["type"]["enum"] == ["final", "tool_call"]
+    assert tool_schema["properties"]["tool"]["anyOf"][0]["enum"] == [
+        "product_lookup"
+    ]
+    assert tool_schema["additionalProperties"] is False
     assert captured["payload"]["reasoning_effort"] == "medium"
     assert "GROQ_API_KEY" not in captured["payload"]["messages"][1]["content"]
 
