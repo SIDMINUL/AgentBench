@@ -591,9 +591,10 @@ def test_ollama_multi_tool_prompt_explains_numeric_comparison(monkeypatch):
     prompt = captured["payload"]["prompt"]
 
     assert action == {"type": "final", "answer": "SKU-RED-01"}
-    assert "Read the numeric stock field from BOTH successful" in prompt
-    assert "27 > 4" in prompt
-    assert "Do not select the first SKU" in prompt
+    assert "Read the numeric stock field from EVERY required" in prompt
+    assert "Compare the returned integers directly" in prompt
+    assert "27 > 4" not in prompt
+    assert "stock 4" not in prompt
 
 
 
