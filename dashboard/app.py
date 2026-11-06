@@ -34,8 +34,9 @@ if st.button("Run benchmark", type="primary"):
 
 st.divider()
 st.header("Compare models")
-st.caption("Runs identical tasks sequentially; every model run is saved.")
+st.caption("Runs the same task suite repeatedly; every individual run is saved so you can inspect stability.")
 comparison_models = st.text_input("Ollama model names (comma-separated)", "qwen2.5:3b, llama3.2:3b, llama3:latest, llama2:latest")
+repetitions = st.number_input("Runs per model", min_value=1, max_value=5, value=3, step=1)
 if st.button("Compare models"):
     models = [item.strip() for item in comparison_models.split(",") if item.strip()]
     if len(models) < 2 or len({item.casefold() for item in models}) != len(models):
@@ -44,14 +45,16 @@ if st.button("Compare models"):
         try:
             with st.spinner("Running benchmark against each model..."):
                 response = httpx.post(f"{api_url.rstrip('/')}/api/benchmark/compare",
-                    json={"provider": provider, "models": models}, timeout=900)
+                    json={"provider": provider, "models": models, "repetitions": int(repetitions)}, timeout=1800)
             response.raise_for_status()
             comparison = response.json()
-            st.success(f'{comparison["comparison_count"]} model runs completed and saved.')
+            st.success(f'{comparison["total_runs"]} benchmark runs completed and saved across {comparison["comparison_count"]} models.')
             comparison_rows = []
             for item in comparison["ranking"]:
                 row = dict(item)
                 category_metrics = row.pop("category_metrics", {})
+                row["run_ids"] = ", ".join(str(value) for value in row.get("run_ids", []))
+                row["success_rate_range"] = "{:.1%}–{:.1%}".format(row.get("success_rate_min", 0.0), row.get("success_rate_max", 0.0))
                 for category in ("reasoning", "planning", "tool_use", "failure_recovery"):
                     metric = category_metrics.get(category, {})
                     row[f"{category}_success"] = (
@@ -64,7 +67,7 @@ if st.button("Compare models"):
             df["tool_call_success_rate"] = df["tool_call_success_rate"].map(lambda value: f"{value:.1%}")
             st.dataframe(df, use_container_width=True, hide_index=True)
             st.caption(comparison["ranking_rule"])
-            st.bar_chart(pd.DataFrame(comparison["results"]).set_index("model")["task_success_rate"])
+            st.bar_chart(pd.DataFrame(comparison["results"]).set_index("model")["mean_task_success_rate"])
         except Exception as exc:
             st.error(f"Model comparison failed: {exc}")
 
