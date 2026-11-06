@@ -182,6 +182,10 @@ try:
         df["task_success_rate"] = df["task_success_rate"].map(
             lambda value: f"{value:.1%}"
         )
+        if "model_independent_task_success_rate" in df:
+            df["model_independent_task_success_rate"] = df[
+                "model_independent_task_success_rate"
+            ].map(lambda value: f"{value:.1%}")
         df["average_latency_ms"] = df["average_latency_ms"].map(
             lambda value: round(value, 1)
         )
