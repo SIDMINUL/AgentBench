@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: agentbench-api
+    runtime: docker
+    healthCheckPath: /api/health
+    disk:
+      name: agentbench-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DEFAULT_PROVIDER
+        value: groq
+      - key: DEFAULT_MODEL
+        value: openai/gpt-oss-120b
+      - key: DEFAULT_JUDGE_MODEL
+        value: openai/gpt-oss-120b
+      - key: AGENTBENCH_DB_PATH
+        value: /var/data/agentbench.db
+      - key: REQUEST_TIMEOUT_SECONDS
+        value: "120"
+
+  - type: web
+    name: agentbench-dashboard
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run dashboard/app.py --server.port $PORT --server.address 0.0.0.0
+    envVars:
+      - key: AGENTBENCH_API_URL
+        fromService:
+          type: web
+          name: agentbench-api
+          property: hostport
+      - key: DEFAULT_MODEL
+        value: openai/gpt-oss-120b
+      - key: DEFAULT_JUDGE_MODEL
+        value: openai/gpt-oss-120b
