@@ -52,6 +52,7 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
     tool_calls = 0
     tool_errors = 0
     duplicate_tool_calls = 0
+    engine_assisted_tool_calls = 0
     answer_retry_used = False
     tool_call_cache = {}
     output = ""
@@ -156,6 +157,7 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                     # burn every step by repeating a premature final action.
                     for requirement in missing_calls:
                         tool_calls += 1
+                        engine_assisted_tool_calls += 1
                         try:
                             result = execute_tool(
                                 requirement["tool"], requirement["arguments"]
@@ -231,6 +233,7 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                     # The declared fallback is deterministic benchmark policy.
                     # Execute it once here; the model must still interpret its result.
                     tool_calls += 1
+                    engine_assisted_tool_calls += 1
                     recovery_signature = (
                         recovery["tool"],
                         json.dumps(
@@ -443,6 +446,7 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
         "tool_calls": tool_calls,
         "tool_errors": tool_errors,
         "duplicate_tool_calls": duplicate_tool_calls,
+        "engine_assisted_tool_calls": engine_assisted_tool_calls,
         "answer_retry_used": answer_retry_used,
         "error": error,
         "trace": trace,
@@ -457,6 +461,7 @@ def run(provider_name: str = "mock", model: str = "mock-agent") -> dict:
     tool_calls = sum(item["tool_calls"] for item in results)
     tool_errors = sum(item["tool_errors"] for item in results)
     duplicate_tool_calls = sum(item["duplicate_tool_calls"] for item in results)
+    engine_assisted_tool_calls = sum(item.get("engine_assisted_tool_calls", 0) for item in results)
     answer_retries = sum(item.get("answer_retry_used", False) for item in results)
     p95 = latencies[max(0, math.ceil(0.95 * total) - 1)] if total else 0.0
 
@@ -497,6 +502,7 @@ def run(provider_name: str = "mock", model: str = "mock-agent") -> dict:
         "tool_calls": tool_calls,
         "tool_errors": tool_errors,
         "duplicate_tool_calls": duplicate_tool_calls,
+        "engine_assisted_tool_calls": engine_assisted_tool_calls,
         "answer_retries": answer_retries,
         "tool_call_success_rate": (
             tool_calls - tool_errors - duplicate_tool_calls
