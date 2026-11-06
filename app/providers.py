@@ -8,6 +8,17 @@ class MockProvider:
 
     def next_action(self, task, history, model):
         task_id = task["id"]
+        if "mock_answer" in task:
+            for requirement in task.get("required_tool_calls", []):
+                completed = any(
+                    item.get("type") == "tool_result"
+                    and item.get("tool") == requirement["tool"]
+                    and all(item.get("result", {}).get(k) == v for k, v in requirement["arguments"].items())
+                    for item in history
+                )
+                if not completed:
+                    return {"type": "tool_call", "tool": requirement["tool"], "arguments": requirement["arguments"]}
+            return {"type": "final", "answer": task["mock_answer"]}
 
         static_answers = {
             "math_001": "15",
