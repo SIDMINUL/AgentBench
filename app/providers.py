@@ -317,14 +317,6 @@ Do not invent tool results or claim a tool was called unless you return a tool_c
         raise ValueError(f"Model returned an unsupported action schema: {raw[:500]}")
 
 
-def get_provider(name: str):
-    if name == "mock":
-        return MockProvider()
-    if name == "ollama":
-        return OllamaProvider()
-    raise ValueError(f"Unsupported provider: {name}")
-
-
 def groq_chat_completion(
     model: str,
     system_prompt: str,
@@ -461,7 +453,7 @@ class GroqProvider:
             "\"evidence\":\"one-sentence verification summary\"}. "
             "For a tool call, use "
             "{\"type\":\"tool_call\",\"tool\":\"product_lookup\","
-            "\"arguments\":{\"sku\":\"SKU-...\}}. "
+            "\"arguments\":{\"sku\":\"SKU-RED-01\"}}. "
             "Evidence is a concise audit note, not hidden chain-of-thought."
         )
 
