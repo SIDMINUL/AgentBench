@@ -210,10 +210,16 @@ def test_judge_run_uses_deterministic_correctness_and_tool_scores(monkeypatch):
                 for task in TASKS
             ]
             import json
-            return {"response": json.dumps({"evaluations": items})}
+            return {
+                "choices": [{
+                    "message": {
+                        "content": json.dumps({"evaluations": items})
+                    }
+                }]
+            }
 
     monkeypatch.setattr(
-        judge.httpx, "post", lambda *args, **kwargs: FakeResponse()
+        "app.providers.httpx.post", lambda *args, **kwargs: FakeResponse()
     )
     evaluation = judge_run(run("mock", "mock-agent"), "judge-model")
     assert len(evaluation["evaluations"]) == len(TASKS)
@@ -730,3 +736,123 @@ def test_engine_assisted_completion_is_not_counted_as_model_independent():
     assert result["engine_assisted_completion"] is True
     assert result["model_independent_success"] is False
 
+
+
+def test_groq_provider_uses_hosted_chat_api_and_structured_json(monkeypatch):
+    import json
+    from app.providers import GroqProvider, settings
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "choices": [{
+                    "message": {
+                        "content": json.dumps({
+                            "type": "final",
+                            "answer": "60",
+                            "evidence": "80 less 25 percent equals 60.",
+                        })
+                    }
+                }]
+            }
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured.update({
+            "url": url, "headers": headers, "payload": json, "timeout": timeout
+        })
+        return FakeResponse()
+
+    monkeypatch.setattr(settings, "groq_api_key", "test-groq-key")
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+
+    task = next(task for task in TASKS if task["id"] == "math_003")
+    action = GroqProvider().next_action(task, [], "openai/gpt-oss-120b")
+
+    assert action == {
+        "type": "final",
+        "answer": "60",
+        "evidence": "80 less 25 percent equals 60.",
+    }
+    assert captured["url"] == "https://api.groq.com/openai/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer test-groq-key"
+    assert captured["payload"]["model"] == "openai/gpt-oss-120b"
+    assert captured["payload"]["response_format"] == {"type": "json_object"}
+    assert captured["payload"]["reasoning_effort"] == "medium"
+    assert "GROQ_API_KEY" not in captured["payload"]["messages"][1]["content"]
+
+
+def test_groq_provider_rejects_missing_api_key(monkeypatch):
+    import pytest
+    from app.providers import GroqProvider, settings
+
+    monkeypatch.setattr(settings, "groq_api_key", None)
+    task = next(task for task in TASKS if task["id"] == "math_001")
+    with pytest.raises(ValueError, match="GROQ_API_KEY is not configured"):
+        GroqProvider().next_action(task, [], "openai/gpt-oss-120b")
+
+
+def test_groq_provider_converts_empty_json_to_retryable_empty_answer(monkeypatch):
+    import json
+    from app.providers import GroqProvider, settings
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": json.dumps({})}}]}
+
+    monkeypatch.setattr(settings, "groq_api_key", "test-key")
+    monkeypatch.setattr(
+        "app.providers.httpx.post", lambda *args, **kwargs: FakeResponse()
+    )
+    task = next(task for task in TASKS if task["id"] == "math_001")
+    action = GroqProvider().next_action(task, [], "openai/gpt-oss-120b")
+    assert action["type"] == "final"
+    assert action["answer"] == ""
+    assert "empty action object" in action["evidence"]
+
+
+def test_groq_retry_prompt_includes_the_rejected_candidate(monkeypatch):
+    import json
+    from app.providers import GroqProvider, settings
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "choices": [{
+                    "message": {
+                        "content": json.dumps({
+                            "type": "final", "answer": "10", "evidence": "Rechecked."
+                        })
+                    }
+                }]
+            }
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr(settings, "groq_api_key", "test-key")
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+    task = next(task for task in TASKS if task["id"] == "logic_001")
+    history = [{
+        "type": "answer_retry_feedback",
+        "candidate_answer": "13",
+        "candidate_evidence": "I subtracted from only one group.",
+        "message": "Previous answer was rejected.",
+    }]
+    GroqProvider().next_action(task, history, "openai/gpt-oss-120b")
+    prompt = captured["payload"]["messages"][1]["content"]
+    assert "Previous answer: 13" in prompt
+    assert "Do not repeat it" in prompt
