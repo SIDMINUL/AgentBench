@@ -56,6 +56,7 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
     answer_retry_used = False
     tool_call_cache = {}
     output = ""
+    output_evidence = ""
     error = None
     success = False
     status = "step_limit"
@@ -314,11 +315,17 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                         "re-evaluate the condition independently, and return a corrected "
                         "final answer. Do not repeat tool calls already present in history."
                     )
-                    history.append({"type": "answer_retry_feedback", "message": feedback})
+                    history.append({
+                        "type": "answer_retry_feedback",
+                        "candidate_answer": candidate,
+                        "candidate_evidence": str(action.get("evidence", "")),
+                        "message": feedback,
+                    })
                     trace.append({
                         "step": step_number,
                         "type": "final_answer_rejected_for_retry",
                         "answer": candidate,
+                        "evidence": str(action.get("evidence", "")),
                         "success": False,
                         "message": feedback,
                     })
@@ -326,12 +333,14 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                     continue
 
                 output = candidate
+                output_evidence = str(action.get("evidence", action.get("reasoning", "")))
                 success = candidate_success
                 status = "completed"
                 trace.append({
                     "step": step_number,
                     "type": "final",
                     "answer": output,
+                    "evidence": output_evidence,
                     "success": success,
                     "retry_used": answer_retry_used,
                 })
@@ -458,6 +467,7 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
         "category": task["category"],
         "output": output,
         "raw_output": output,
+        "evidence": output_evidence,
         "expected": task["expected"],
         "verification": verification,
         "success": success,
