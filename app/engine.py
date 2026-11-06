@@ -151,6 +151,45 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                         "missing": missing_calls,
                         "message": message,
                     })
+                    # Required observations are part of the task contract. Execute
+                    # missing fixture lookups deterministically so a model cannot
+                    # burn every step by repeating a premature final action.
+                    for requirement in missing_calls:
+                        tool_calls += 1
+                        try:
+                            result = execute_tool(
+                                requirement["tool"], requirement["arguments"]
+                            )
+                            history.append({
+                                "type": "tool_result",
+                                "tool": requirement["tool"],
+                                "result": result,
+                                "engine_assisted": True,
+                            })
+                            trace.append({
+                                "step": step_number,
+                                "type": "engine_assisted_tool_call",
+                                "tool": requirement["tool"],
+                                "arguments": requirement["arguments"],
+                                "result": result,
+                                "success": True,
+                            })
+                        except Exception as tool_exc:
+                            tool_errors += 1
+                            history.append({
+                                "type": "tool_error",
+                                "tool": requirement["tool"],
+                                "error": str(tool_exc),
+                                "engine_assisted": True,
+                            })
+                            trace.append({
+                                "step": step_number,
+                                "type": "engine_assisted_tool_call",
+                                "tool": requirement["tool"],
+                                "arguments": requirement["arguments"],
+                                "error": str(tool_exc),
+                                "success": False,
+                            })
                     status = "running"
                     continue
 
@@ -189,6 +228,56 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                         "answer": str(action.get("answer", "")),
                         "message": message,
                     })
+                    # The declared fallback is deterministic benchmark policy.
+                    # Execute it once here; the model must still interpret its result.
+                    tool_calls += 1
+                    recovery_signature = (
+                        recovery["tool"],
+                        json.dumps(
+                            recovery["arguments"], sort_keys=True,
+                            separators=(",", ":")
+                        ),
+                    )
+                    try:
+                        recovered_result = execute_tool(
+                            recovery["tool"], recovery["arguments"]
+                        )
+                        tool_call_cache[recovery_signature] = {
+                            "success": True, "result": recovered_result
+                        }
+                        history.append({
+                            "type": "tool_result",
+                            "tool": recovery["tool"],
+                            "result": recovered_result,
+                            "engine_assisted": True,
+                        })
+                        trace.append({
+                            "step": step_number,
+                            "type": "engine_assisted_recovery_lookup",
+                            "tool": recovery["tool"],
+                            "arguments": recovery["arguments"],
+                            "result": recovered_result,
+                            "success": True,
+                        })
+                    except Exception as tool_exc:
+                        tool_errors += 1
+                        tool_call_cache[recovery_signature] = {
+                            "success": False, "error": str(tool_exc)
+                        }
+                        history.append({
+                            "type": "tool_error",
+                            "tool": recovery["tool"],
+                            "error": str(tool_exc),
+                            "engine_assisted": True,
+                        })
+                        trace.append({
+                            "step": step_number,
+                            "type": "engine_assisted_recovery_lookup",
+                            "tool": recovery["tool"],
+                            "arguments": recovery["arguments"],
+                            "error": str(tool_exc),
+                            "success": False,
+                        })
                     status = "running"
                     continue
 
