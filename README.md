@@ -6,6 +6,7 @@ A reproducible platform for evaluating LLM agents on reasoning, planning, multi-
 
 - Mock and Ollama model providers
 - Multi-step agent execution with per-task tool allowlists and required-observation guards
+- Deterministic execution of task-declared mandatory and fallback lookups when the model attempts a premature final answer; engine-assisted calls are separately traced and counted
 - Execution traces containing tool arguments, observations, errors, and final answers
 - Deterministic exact-match task success, category-level success rates, tool-call success, average latency, and p95 latency
 - Independent deterministic verification for selected arithmetic/time tasks, preserving raw model answers and reporting suggested corrections separately
