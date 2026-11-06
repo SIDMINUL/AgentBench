@@ -223,7 +223,7 @@ def test_judge_run_uses_deterministic_correctness_and_tool_scores(monkeypatch):
         if item["task_id"] == "recovery_001"
     )
     assert recovery["tool_use_quality"] == 3
-    assert evaluation["average_overall_score"] == 4.58
+    assert evaluation["average_overall_score"] == 4.33
 
 
 def test_repeated_successful_tool_call_is_suppressed(monkeypatch):
@@ -632,8 +632,8 @@ def test_independent_verifier_recalculates_fraction_and_time():
 
 def test_run_reports_independent_verification_coverage():
     result = run("mock", "mock-agent")
-    assert result["verification_metrics"]["supported_tasks"] == 5
-    assert result["verification_metrics"]["raw_correct"] == 5
+    assert result["verification_metrics"]["supported_tasks"] == 7
+    assert result["verification_metrics"]["raw_correct"] == 7
     assert result["verification_metrics"]["raw_accuracy"] == 1.0
     assert result["verification_metrics"]["correction_applied"] is False
 
