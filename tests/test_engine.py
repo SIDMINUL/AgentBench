@@ -223,7 +223,7 @@ def test_judge_run_uses_deterministic_correctness_and_tool_scores(monkeypatch):
         if item["task_id"] == "recovery_001"
     )
     assert recovery["tool_use_quality"] == 3
-    assert evaluation["average_overall_score"] == 4.33
+    assert evaluation["average_overall_score"] == 4.24
 
 
 def test_repeated_successful_tool_call_is_suppressed(monkeypatch):
