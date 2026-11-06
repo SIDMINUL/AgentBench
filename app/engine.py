@@ -162,6 +162,16 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                             result = execute_tool(
                                 requirement["tool"], requirement["arguments"]
                             )
+                            required_signature = (
+                                requirement["tool"],
+                                json.dumps(
+                                    requirement["arguments"], sort_keys=True,
+                                    separators=(",", ":")
+                                ),
+                            )
+                            tool_call_cache[required_signature] = {
+                                "success": True, "result": result
+                            }
                             history.append({
                                 "type": "tool_result",
                                 "tool": requirement["tool"],
@@ -178,6 +188,16 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                             })
                         except Exception as tool_exc:
                             tool_errors += 1
+                            required_signature = (
+                                requirement["tool"],
+                                json.dumps(
+                                    requirement["arguments"], sort_keys=True,
+                                    separators=(",", ":")
+                                ),
+                            )
+                            tool_call_cache[required_signature] = {
+                                "success": False, "error": str(tool_exc)
+                            }
                             history.append({
                                 "type": "tool_error",
                                 "tool": requirement["tool"],
