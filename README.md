@@ -8,7 +8,7 @@ A reproducible platform for evaluating LLM agents on reasoning, planning, multi-
 - Multi-step agent execution with per-task tool allowlists and required-observation guards
 - Deterministic execution of task-declared mandatory and fallback lookups when the model attempts a premature final answer; engine-assisted calls are separately traced and counted
 - Execution traces containing tool arguments, observations, errors, and final answers
-- Deterministic exact-match task success, category-level success rates, tool-call success, average latency, and p95 latency
+- Deterministic exact-match task success, category-level success rates, model-initiated versus engine-assisted tool calls and task completions, average latency, and p95 latency
 - Independent deterministic verification for selected arithmetic/time tasks, preserving raw model answers and reporting suggested corrections separately
 - 22 benchmark tasks across reasoning, planning, tool use, and three failure-recovery scenarios
 - FastAPI API and Streamlit dashboard
@@ -27,7 +27,7 @@ A reproducible platform for evaluating LLM agents on reasoning, planning, multi-
 | Failure recovery | 3 | Recovering from invalid SKUs using different fallback products and stock conditions |
 | **Total** | **22** | |
 
-The benchmark uses a small deterministic inventory tool with known fixture data. Three failure-recovery tasks intentionally request unknown SKUs and require different valid fallback lookups. The execution engine blocks premature final answers until declared required tool observations (including both lookups in the multi-product comparison) and any required recovery lookup have succeeded. Run summaries report success rates separately for reasoning, planning, tool use, and failure recovery.
+The benchmark uses a small deterministic inventory tool with known fixture data. Three failure-recovery tasks intentionally request unknown SKUs and require different valid fallback lookups. The execution engine blocks premature final answers until declared required tool observations (including both lookups in the multi-product comparison) and any required recovery lookup have succeeded. Run summaries report success rates separately for reasoning, planning, tool use, and failure recovery. They also distinguish model-independent successful tasks from tasks completed with engine-assisted tool calls; engine-assisted completion is not counted as model-independent success.
 
 ## Quick start
 
