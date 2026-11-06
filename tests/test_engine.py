@@ -7,9 +7,9 @@ from app.providers import MockProvider
 
 def test_mock_benchmark_passes_all_tasks():
     result = run("mock", "mock-agent")
-    assert result["total_tasks"] == len(TASKS) == 12
+    assert result["total_tasks"] == len(TASKS) == 22
     assert result["task_success_rate"] == 1.0
-    assert result["successful_tasks"] == 12
+    assert result["successful_tasks"] == 22
 
 
 def test_benchmark_covers_all_task_categories():
@@ -23,9 +23,9 @@ def test_benchmark_covers_all_task_categories():
 def test_benchmark_reports_category_level_metrics():
     result = run("mock", "mock-agent")
     assert result["category_metrics"]["reasoning"] == {
-        "total_tasks": 4, "successful_tasks": 4, "task_success_rate": 1.0
+        "total_tasks": 8, "successful_tasks": 8, "task_success_rate": 1.0
     }
-    assert result["category_metrics"]["planning"]["total_tasks"] == 2
+    assert result["category_metrics"]["planning"]["total_tasks"] == 6
     assert result["category_metrics"]["tool_use"]["successful_tasks"] == 3
     assert result["category_metrics"]["failure_recovery"] == {
         "total_tasks": 3, "successful_tasks": 3, "task_success_rate": 1.0
@@ -169,8 +169,8 @@ def test_compare_endpoint_runs_and_saves_each_model(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "run", lambda provider, model: {
         "provider": provider, "model": model,
         "task_success_rate": 1.0 if model == "model-a" else 0.5,
-        "successful_tasks": 12 if model == "model-a" else 6,
-        "total_tasks": 12,
+        "successful_tasks": 22 if model == "model-a" else 11,
+        "total_tasks": 22,
         "average_latency_ms": 100.0 if model == "model-a" else 50.0,
         "p95_latency_ms": 120.0, "tool_calls": 1, "tool_errors": 0,
         "tool_call_success_rate": 1.0, "results": []})
@@ -632,7 +632,7 @@ def test_independent_verifier_recalculates_fraction_and_time():
 
 def test_run_reports_independent_verification_coverage():
     result = run("mock", "mock-agent")
-    assert result["verification_metrics"]["supported_tasks"] == 3
+    assert result["verification_metrics"]["supported_tasks"] == 5
     assert result["verification_metrics"]["raw_correct"] == 3
     assert result["verification_metrics"]["raw_accuracy"] == 1.0
     assert result["verification_metrics"]["correction_applied"] is False
