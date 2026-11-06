@@ -703,3 +703,30 @@ def test_compare_endpoint_aggregates_repeated_runs(monkeypatch, tmp_path):
     assert result_a["success_rate_max"] == 1.0
     assert len(result_a["run_ids"]) == 2
     assert data["ranking"][0]["model"] == "model-b"
+
+def test_run_separates_model_independent_and_engine_assisted_successes():
+    result = run("mock", "mock-agent")
+    assert result["successful_tasks"] == 22
+    assert result["model_independent_successful_tasks"] == 22
+    assert result["engine_assisted_successful_tasks"] == 0
+    assert result["model_independent_task_success_rate"] == 1.0
+    multi = next(item for item in result["results"] if item["task_id"] == "multi_003")
+    assert multi["model_initiated_tool_calls"] == 2
+    assert multi["engine_assisted_completion"] is False
+    assert multi["model_independent_success"] is True
+
+
+def test_engine_assisted_completion_is_not_counted_as_model_independent():
+    task = next(task for task in TASKS if task["id"] == "multi_003")
+
+    class EarlyFinalProvider:
+        def next_action(self, task, history, model):
+            return {"type": "final", "answer": "SKU-RED-01"}
+
+    result = run_task(task, EarlyFinalProvider(), "mock", "early-final")
+    assert result["success"] is True
+    assert result["engine_assisted_tool_calls"] == 2
+    assert result["model_initiated_tool_calls"] == 0
+    assert result["engine_assisted_completion"] is True
+    assert result["model_independent_success"] is False
+
