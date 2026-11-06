@@ -107,7 +107,7 @@ TASKS = [
         "required_recovery": {"tool": "product_lookup", "arguments": {"sku": "SKU-RED-01"}},
         "tools": ["product_lookup"],
         "max_steps": 5,
-    },,
+    },
     {"id":"math_003","category":"reasoning","prompt":"A jacket costs 80 dollars and is discounted by 25%. What is the sale price? Reply with the number only.","expected":"60","verification_spec":{"kind":"percentage_discount","price":80,"percent":25},"mock_answer":"60","tools":[],"max_steps":3},
     {"id":"math_004","category":"reasoning","prompt":"A recipe uses 3 cups of flour for 12 muffins. How many cups are needed for 20 muffins at the same ratio? Reply with the number only.","expected":"5","verification_spec":{"kind":"ratio","base_amount":3,"base_units":12,"target_units":20},"mock_answer":"5","tools":[],"max_steps":3},
     {"id":"logic_003","category":"reasoning","prompt":"Mira finished ahead of Noor. Noor finished ahead of Omar. Who finished last? Reply with the name only.","expected":"Omar","mock_answer":"Omar","tools":[],"max_steps":3},
