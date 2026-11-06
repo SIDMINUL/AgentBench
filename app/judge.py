@@ -55,6 +55,28 @@ DATA:
 {json.dumps(payload, ensure_ascii=False)}
 """
 
+    judge_schema = {
+        "type": "object",
+        "properties": {
+            "evaluations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "reasoning_quality": {
+                            "type": "integer", "minimum": 1, "maximum": 5
+                        },
+                        "rationale": {"type": "string"},
+                    },
+                    "required": ["task_id", "reasoning_quality", "rationale"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["evaluations"],
+        "additionalProperties": False,
+    }
     raw = groq_chat_completion(
         model=judge_model,
         system_prompt=(
@@ -63,6 +85,12 @@ DATA:
         ),
         user_prompt=prompt,
         max_completion_tokens=8192,
+        response_schema=(
+            judge_schema
+            if judge_model in {"openai/gpt-oss-120b", "openai/gpt-oss-20b",
+                               "qwen/qwen3.8-27b"}
+            else None
+        ),
     )
 
     try:
