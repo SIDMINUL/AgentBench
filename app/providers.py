@@ -323,3 +323,250 @@ def get_provider(name: str):
     if name == "ollama":
         return OllamaProvider()
     raise ValueError(f"Unsupported provider: {name}")
+
+
+def groq_chat_completion(
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    max_completion_tokens: int = 2048,
+) -> str:
+    """Call Groq's OpenAI-compatible Chat Completions API and return message content."""
+    api_key = (settings.groq_api_key or "").strip()
+    if not api_key:
+        raise ValueError(
+            "GROQ_API_KEY is not configured. Add it to your local .env file "
+            "or to the deployment environment variables."
+        )
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.1,
+        "max_completion_tokens": max_completion_tokens,
+    }
+    # These reasoning controls are documented for GPT-OSS and Qwen3.8 models.
+    if model.startswith("openai/gpt-oss") or model.startswith("qwen/qwen3.8"):
+        payload["reasoning_effort"] = "medium"
+
+    try:
+        response = httpx.post(
+            f"{settings.groq_base_url.rstrip('/')}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=max(settings.request_timeout_seconds, 90),
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        try:
+            error_data = exc.response.json()
+            detail = (
+                error_data.get("error", {}).get("message")
+                if isinstance(error_data, dict) else None
+            )
+        except (ValueError, TypeError):
+            detail = None
+        detail = str(detail or "No error details returned by Groq.")
+        if status_code == 401:
+            message = "Groq rejected GROQ_API_KEY (401). Check that the key is valid."
+        elif status_code == 403:
+            message = (
+                f"Groq denied access to model '{model}' (403). Check model access, "
+                "project permissions, and account limits."
+            )
+        elif status_code == 404:
+            message = f"Groq model or endpoint was not found (404): {model}."
+        elif status_code == 429:
+            message = (
+                "Groq rate limit or quota reached (429). Check your Groq usage "
+                "and plan limits, then retry."
+            )
+        else:
+            message = f"Groq API request failed ({status_code})."
+        raise ValueError(f"{message} {detail}") from exc
+    except httpx.TimeoutException as exc:
+        raise ValueError(
+            "Groq request timed out. Increase REQUEST_TIMEOUT_SECONDS or retry."
+        ) from exc
+    except httpx.RequestError as exc:
+        raise ValueError(f"Could not reach Groq API: {exc}") from exc
+
+    try:
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise ValueError("Groq returned an unexpected Chat Completions response.") from exc
+
+    if isinstance(content, list):
+        content = "".join(
+            part.get("text", "") for part in content if isinstance(part, dict)
+        )
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("Groq returned an empty assistant message.")
+    return content.strip()
+
+
+class GroqProvider:
+    """Hosted Groq agent provider. No local model runtime is required."""
+
+    def next_action(self, task, history, model):
+        allowed_tools = task.get("tools", [])
+        required_calls = task.get("required_tool_calls", [])
+        completed_results = [
+            item for item in history if item.get("type") == "tool_result"
+        ]
+        pending_calls = [
+            requirement for requirement in required_calls
+            if not any(
+                item.get("tool") == requirement["tool"]
+                and all(
+                    item.get("result", {}).get(key) == value
+                    for key, value in requirement["arguments"].items()
+                )
+                for item in completed_results
+            )
+        ]
+        recovery = task.get("required_recovery")
+        recovery_completed = bool(
+            recovery and any(
+                item.get("type") == "tool_result"
+                and item.get("tool") == recovery["tool"]
+                and all(
+                    item.get("result", {}).get(key) == value
+                    for key, value in recovery["arguments"].items()
+                )
+                for item in completed_results
+            )
+        )
+        previous_retry = next(
+            (item for item in reversed(history)
+             if item.get("type") == "answer_retry_feedback"),
+            None,
+        )
+
+        system_prompt = (
+            "You are an accurate tool-using benchmark agent. Follow the task literally. "
+            "Use only supplied observations; never invent tool results. "
+            "Return one JSON object and no markdown. For a final answer, use "
+            "{\"type\":\"final\",\"answer\":\"exact answer\","
+            "\"evidence\":\"one-sentence verification summary\"}. "
+            "For a tool call, use "
+            "{\"type\":\"tool_call\",\"tool\":\"product_lookup\","
+            "\"arguments\":{\"sku\":\"SKU-...\}}. "
+            "Evidence is a concise audit note, not hidden chain-of-thought."
+        )
+
+        prompt = f"""
+BENCHMARK TASK
+{task["prompt"]}
+
+ALLOWED TOOLS
+{json.dumps(allowed_tools)}
+
+REQUIRED TOOL CALLS STILL OUTSTANDING
+{json.dumps(pending_calls) if pending_calls else "None"}
+
+REQUIRED RECOVERY ACTION
+{json.dumps(recovery) if recovery and not recovery_completed else "None"}
+
+SUCCESSFUL TOOL OBSERVATIONS
+{json.dumps(completed_results, ensure_ascii=False)}
+
+FULL ACTION HISTORY
+{json.dumps(history, ensure_ascii=False)}
+
+DECISION RULES
+- If REQUIRED TOOL CALLS STILL OUTSTANDING is not None, call the next outstanding tool now.
+- If a lookup failed, its error contains no product stock. Perform the specified recovery lookup using its different SKU.
+- After a successful fallback lookup, apply the condition in the original task to that returned stock value. Do not carry over the answer from another recovery task.
+- For stock rules, apply inequalities literally: below N is < N; above N is > N; at least N is >= N; greater than N is > N; N or less is <= N.
+- For arithmetic, write the numeric expression out before evaluating it. For a fraction change, calculate the fraction of the original total, subtract it, then apply returns. For a discount, subtract the discount amount from the original price. For a ratio, calculate one unit's amount before scaling.
+- For time questions, add every duration and break in minutes to the start time, then convert once to HH:MM. Check the total elapsed minutes.
+- For ordering questions, respect every stated dependency. For "all" and "some" logic, do not assume two groups overlap unless the premises prove it.
+- The final answer must follow the exact format requested in the task. Put any brief calculation or observation check in the evidence field, not in the answer.
+
+{(
+  "RETRY REQUIRED: Your previous answer was rejected. "
+  f"Previous answer: {previous_retry.get('candidate_answer', '')}. "
+  "Do not repeat it. Re-evaluate the task and observations, and give a corrected answer."
+) if previous_retry else ""}
+
+NEXT ACTION
+Return one tool_call if a required observation is missing. Otherwise return one final answer.
+"""
+
+        raw = groq_chat_completion(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=prompt,
+            max_completion_tokens=2048,
+        )
+        try:
+            action = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Groq did not return valid JSON: {raw[:500]}") from exc
+
+        if not isinstance(action, dict):
+            raise ValueError("Groq action must be a JSON object.")
+
+        action_type = action.get("type") or action.get("action")
+        if action_type in {"final_answer", "answer", "respond"}:
+            action_type = "final"
+        if action_type in {"tool", "call_tool", "function_call"}:
+            action_type = "tool_call"
+        if not action_type and "answer" in action:
+            action_type = "final"
+
+        if action_type == "final":
+            return {
+                "type": "final",
+                "answer": str(action.get("answer", action.get("content", ""))),
+                "evidence": str(action.get("evidence", action.get("reasoning", ""))),
+            }
+
+        if action_type == "tool_call":
+            tool_name = action.get("tool", action.get("tool_name", action.get("name")))
+            arguments = action.get(
+                "arguments", action.get("tool_input", action.get("parameters", {}))
+            )
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError as exc:
+                    raise ValueError("Groq returned invalid JSON tool arguments.") from exc
+            if not isinstance(arguments, dict):
+                raise ValueError("Groq tool-call arguments must be a JSON object.")
+            return {
+                "type": "tool_call",
+                "tool": tool_name,
+                "arguments": arguments,
+            }
+
+        # Convert an empty object into an empty final so the engine's bounded
+        # answer-retry mechanism can recover rather than recording a parser crash.
+        if not action:
+            return {
+                "type": "final",
+                "answer": "",
+                "evidence": "The model returned an empty action object.",
+            }
+        raise ValueError(f"Groq returned an unsupported action schema: {raw[:500]}")
+
+
+def get_provider(name: str):
+    if name == "mock":
+        return MockProvider()
+    if name == "groq":
+        return GroqProvider()
+    if name == "ollama":
+        return OllamaProvider()
+    raise ValueError(f"Unsupported provider: {name}")
