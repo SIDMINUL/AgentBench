@@ -1,114 +1,132 @@
 # AgentBench
 
-A reproducible platform for evaluating LLM agents on reasoning, planning, multi-step tool use, and failure recovery.
+AgentBench is a hosted LLM-agent evaluation platform for reasoning, planning, tool use, and failure recovery. Groq is the default inference provider, so the deployed application does not need a local Ollama runtime or a GPU.
 
-## Features
+## What it measures
 
-- Mock and Ollama model providers
-- Multi-step agent execution with per-task tool allowlists and required-observation guards
-- Deterministic execution of task-declared mandatory and fallback lookups when the model attempts a premature final answer; engine-assisted calls are separately traced and counted
-- Execution traces containing tool arguments, observations, errors, and final answers
-- Deterministic exact-match task success, category-level success rates, model-initiated versus engine-assisted tool calls and task completions, average latency, and p95 latency
-- Independent deterministic verification for selected arithmetic/time tasks, preserving raw model answers and reporting suggested corrections separately
-- 22 benchmark tasks across reasoning, planning, tool use, and three failure-recovery scenarios
-- FastAPI API and Streamlit dashboard
-- SQLite persistence for CLI and API benchmark runs
-- Multi-model comparison using identical task sets
-- Optional Ollama-based LLM-as-a-Judge
-- Automated tests for orchestration, tool use, multi-tool workflows, and recovery
+- 22 deterministic benchmark tasks across reasoning, planning, tool use, and failure recovery
+- Per-task action traces, including tool arguments, observations, errors, retries, and concise evidence summaries
+- Exact-match task success and category-level results
+- Model-independent success separated from engine-assisted completion
+- Tool-call success, duplicate calls, tool errors, average latency, and p95 latency
+- Independent recalculation for selected arithmetic and time tasks; raw model answers are never silently replaced
+- Repeated multi-model comparisons (1–5 repetitions per model), saved to SQLite
+- Optional Groq-powered reasoning judge; judge scores do not replace benchmark accuracy
+- Mock provider for deterministic orchestration tests; optional Ollama provider for local development
 
-## Benchmark task coverage
+## Groq model configuration
 
-| Category | Tasks | What is tested |
-|---|---:|---|
-| Reasoning | 8 | Arithmetic, percentages, ratios, relational ordering, and logical inference |
-| Planning | 6 | Multi-stage dependencies and time-based scheduling, including breaks |
-| Tool use | 5 | Inventory lookups, stock thresholds, conditional decisions, and multiple tool calls |
-| Failure recovery | 3 | Recovering from invalid SKUs using different fallback products and stock conditions |
-| **Total** | **22** | |
+The default model is openai/gpt-oss-120b. Groq's model catalog currently lists it as a production model. Model availability and quotas depend on the Groq account and plan; check the current model catalog before changing the model ID.
 
-The benchmark uses a small deterministic inventory tool with known fixture data. Three failure-recovery tasks intentionally request unknown SKUs and require different valid fallback lookups. The execution engine blocks premature final answers until declared required tool observations (including both lookups in the multi-product comparison) and any required recovery lookup have succeeded. Run summaries report success rates separately for reasoning, planning, tool use, and failure recovery. They also distinguish model-independent successful tasks from tasks completed with engine-assisted tool calls; engine-assisted completion is not counted as model-independent success.
+- Groq API documentation: https://console.groq.com/docs/api-reference
+- Groq supported models: https://console.groq.com/docs/models
 
-## Quick start
+The Groq API key is read only by the backend from GROQ_API_KEY. It is never sent to the Streamlit browser UI and must not be committed to Git.
 
-```bash
-python -m venv .venv
-# Windows: .venv\\Scripts\\activate
-# Linux/macOS: source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
+## Run locally
 
-API docs: http://127.0.0.1:8000/docs
+Use Python 3.11 or newer.
 
-In another terminal:
+    git clone https://github.com/SIDMINUL/AgentBench.git
+    cd AgentBench
+    python -m venv .venv
+    .venv\Scripts\Activate.ps1
+    pip install -r requirements.txt
+    Copy-Item .env.example .env
 
-```bash
-streamlit run dashboard/app.py
-```
+Open .env and set your Groq API key:
 
-## Run benchmarks
+    GROQ_API_KEY=your_groq_api_key
+    DEFAULT_PROVIDER=groq
+    DEFAULT_MODEL=openai/gpt-oss-120b
+    DEFAULT_JUDGE_MODEL=openai/gpt-oss-120b
 
-```bash
-python -m app.cli --provider mock
-ollama pull llama3.2:3b
-python -m app.cli --provider ollama --model llama3.2:3b
-```
+Never paste the key into source code, a commit, a screenshot, or a frontend environment variable.
 
-The mock provider is a deterministic fixture for testing the benchmark engine. Its perfect score does not represent real model performance. Use an Ollama model to measure actual agent behavior.
+Run the API:
 
-## Compare models
+    uvicorn app.main:app --reload
 
-Use `POST /api/benchmark/compare` with at least two model names:
+Run the dashboard in another terminal:
 
-```json
-{"provider":"ollama","models":["qwen2.5:3b","llama3.2:3b","llama3:latest","llama2:latest"],"repetitions":3}
-```
+    streamlit run dashboard/app.py
 
-The dashboard provides the same workflow. The default comparison includes Qwen 2.5 3B, Llama 3.2 3B, Llama 3, and Llama 2; verify that each model is installed locally with `ollama list` before running. Each model runs the same task set the requested number of times (1–5, default 1), and every individual run is saved to SQLite. Results report mean success rate, minimum/maximum success rate, mean latency, and aggregated category metrics. Rank by mean success rate, then mean latency.
+Open the dashboard at http://localhost:8501 or API docs at http://localhost:8000/docs.
 
-## LLM-as-a-Judge
+## Run a benchmark
 
-Use `POST /api/benchmark/history/{run_id}/judge` with:
+Groq is the default provider and model:
 
-```json
-{"judge_model":"llama3.2:3b"}
-```
+    python -m app.cli
 
-The scoring dimensions are separated to reduce judge-model errors:
+Or specify them explicitly:
 
-- **Correctness:** derived from the benchmark's deterministic success flag.
-- **Reasoning quality:** assessed by the LLM judge on a 1–5 scale.
-- **Tool-use quality:** calculated from task tool permissions and the recorded execution trace.
-- **Overall:** arithmetic mean of correctness, reasoning, and tool-use scores.
+    python -m app.cli --provider groq --model openai/gpt-oss-120b
 
-LLM rationales and reasoning scores are supplementary assessments, not ground truth. Review samples manually before using judge scores for formal model claims.
+Validate the orchestration without using an API:
 
-## Persistence and API
+    python -m app.cli --provider mock
 
-Runs are saved to `data/agentbench.db` by default. Set `AGENTBENCH_DB_PATH` to change the location.
+Optional local-only Ollama use:
 
-- `GET /api/health`
-- `GET /api/tasks`
-- `POST /api/benchmark/run`
-- `POST /api/benchmark/compare`
-- `POST /api/benchmark/history/{run_id}/judge`
-- `GET /api/benchmark/history?limit=50`
-- `GET /api/benchmark/history/{run_id}`
+    python -m app.cli --provider ollama --model llama3.2:3b
 
-## Evaluation notes and limitations
+The mock provider's perfect score validates the test harness only; it is not model performance. For comparisons, use the same task set and at least three repetitions when practical.
 
-- The included tasks are a compact development benchmark, not a standardized or statistically representative evaluation suite. The engine enforces explicitly declared recovery requirements; report this orchestration policy when comparing agent performance.
-- Mock results validate orchestration only, not model capability.
-- Exact-match scoring can mark semantically correct but differently phrased answers as incorrect.
-- The inventory tool uses fixed fixture data; it does not connect to a live commerce system.
-- Latency depends on local hardware, model size, warm-up state, and Ollama configuration.
-- Selected arithmetic/time tasks have a deterministic verifier that recomputes answers from structured task data. It records the raw model answer, reference answer, and any suggested correction separately; it never overwrites the model output or changes the raw task-success score.
-- The verifier currently covers five templates: count after removal, fraction then return, elapsed time, percentage discount, and proportional ratio. Other tasks are not independently verified by this mechanism.
-- Category-level metrics help isolate weaknesses, but the reasoning category currently contains eight tasks and should not be treated as a statistically robust score.
-- For meaningful comparisons, use at least three repetitions when practical, report the observed success-rate range, and keep task prompts and tool fixtures identical. Repetitions improve visibility into run-to-run variability but do not make this compact task suite statistically representative.
-- LLM-as-a-Judge should be calibrated against human-reviewed examples before being treated as reliable.
+## Compare Groq models
+
+Via the Streamlit dashboard, select groq, enter two or more model IDs available to your Groq account, and choose 3 repetitions.
+
+The API equivalent is:
+
+    Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/benchmark/compare -ContentType "application/json" -Body '{"provider":"groq","models":["openai/gpt-oss-120b","qwen/qwen3.8-27b"],"repetitions":3}'
+
+The comparison reports pipeline success and model-independent success separately. Rankings use mean model-independent task success first, then latency. This avoids awarding a model credit for tasks completed through engine-assisted tool calls.
+
+## Deploy on Render
+
+The repository includes a render.yaml Blueprint for an API service and a Streamlit dashboard service.
+
+1. Push the repository to GitHub and create a new Blueprint on Render from SIDMINUL/AgentBench.
+2. When prompted, provide GROQ_API_KEY as a secret. Do not put the key in render.yaml.
+3. The Blueprint sets DEFAULT_PROVIDER=groq, DEFAULT_MODEL=openai/gpt-oss-120b, and DEFAULT_JUDGE_MODEL=openai/gpt-oss-120b.
+4. The API service uses a persistent disk mounted at /var/data; benchmark history is stored at /var/data/agentbench.db.
+5. Once both services are live, open the dashboard service URL. Its API URL is wired to the API service over Render's private network.
+
+If you create the services manually instead of using the Blueprint, set these API environment variables:
+
+| Variable | Value |
+|---|---|
+| GROQ_API_KEY | Your Groq API key (secret) |
+| DEFAULT_PROVIDER | groq |
+| DEFAULT_MODEL | openai/gpt-oss-120b |
+| DEFAULT_JUDGE_MODEL | openai/gpt-oss-120b |
+| AGENTBENCH_DB_PATH | /var/data/agentbench.db when using a persistent disk |
+| REQUEST_TIMEOUT_SECONDS | 120 |
+
+The dashboard service needs AGENTBENCH_API_URL set to the API service's internal URL, for example http://agentbench-api:10000 when the API service name and port match the Blueprint.
+
+## API endpoints
+
+- GET /api/health
+- GET /api/tasks
+- POST /api/benchmark/run
+- POST /api/benchmark/compare
+- POST /api/benchmark/history/{run_id}/judge
+- GET /api/benchmark/history?limit=50
+- GET /api/benchmark/history/{run_id}
+
+## Benchmark interpretation and limitations
+
+- This is a compact development benchmark, not a standardized or statistically representative evaluation suite.
+- Exact-match scoring can mark semantically valid but differently formatted answers as incorrect.
+- Model-independent success is the primary metric for autonomous agent claims. Pipeline success can also include tasks finished after engine-assisted required lookups.
+- Independent verification covers only tasks that provide a supported structured verification specification. It reports suggestions separately and never overwrites model output.
+- The inventory tool uses fixed fixture data, not a live commerce system.
+- Latency, model availability, rate limits, and output quality depend on the selected Groq model and account plan.
+- Repeated runs show variability but do not make this small benchmark statistically representative.
+- LLM judge scores are supplementary and should be calibrated against human-reviewed examples before making quality claims.
 
 ## Safety
 
-Agent tools are allowlisted per task. The agent cannot execute arbitrary shell commands or Python code.
+Tools are allowlisted per task. The agent cannot execute arbitrary shell commands or Python code.
