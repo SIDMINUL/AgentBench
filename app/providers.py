@@ -511,38 +511,45 @@ Return one tool_call if a required observation is missing. Otherwise return one 
         required_action_fields = [
             "type", "answer", "evidence", "tool", "arguments"
         ]
-        final_action_schema = {
+        nullable_arguments_schema = {
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": {"sku": {"type": "string"}},
+                    "required": ["sku"],
+                    "additionalProperties": False,
+                },
+                {"type": "null"},
+            ]
+        }
+        response_schema = {
             "type": "object",
             "properties": {
-                "type": {"type": "string", "enum": ["final"]},
-                "answer": {"type": "string"},
-                "evidence": {"type": "string"},
-                "tool": {"type": "null"},
-                "arguments": {"type": "null"},
+                "type": {
+                    "type": "string",
+                    "enum": ["final", "tool_call"] if can_call_product_lookup
+                    else ["final"],
+                },
+                "answer": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}]
+                },
+                "evidence": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}]
+                },
+                "tool": {
+                    "anyOf": [
+                        {"type": "string", "enum": ["product_lookup"]},
+                        {"type": "null"},
+                    ] if can_call_product_lookup else [{"type": "null"}]
+                },
+                "arguments": (
+                    nullable_arguments_schema
+                    if can_call_product_lookup else {"type": "null"}
+                ),
             },
             "required": required_action_fields,
             "additionalProperties": False,
         }
-        action_variants = [final_action_schema]
-        if can_call_product_lookup:
-            action_variants.append({
-                "type": "object",
-                "properties": {
-                    "type": {"type": "string", "enum": ["tool_call"]},
-                    "answer": {"type": "null"},
-                    "evidence": {"type": "null"},
-                    "tool": {"type": "string", "enum": ["product_lookup"]},
-                    "arguments": {
-                        "type": "object",
-                        "properties": {"sku": {"type": "string"}},
-                        "required": ["sku"],
-                        "additionalProperties": False,
-                    },
-                },
-                "required": required_action_fields,
-                "additionalProperties": False,
-            })
-        response_schema = {"anyOf": action_variants}
         raw = groq_chat_completion(
             model=model,
             system_prompt=system_prompt,
