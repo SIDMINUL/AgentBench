@@ -6,7 +6,7 @@ from app.judge import judge_run
 from app.storage import get_run, list_runs, save_run, update_run
 from app.tasks import TASKS
 
-app = FastAPI(title="AgentBench", version="0.6.0",
+app = FastAPI(title="AgentBench", version="0.7.0",
               description="A reproducible benchmark platform for LLM agents.")
 
 
@@ -18,10 +18,25 @@ class RunRequest(BaseModel):
 class CompareRequest(BaseModel):
     provider: str = "ollama"
     models: list[str] = Field(min_length=2, max_length=8)
+    repetitions: int = Field(default=1, ge=1, le=5)
 
 
 class JudgeRequest(BaseModel):
     judge_model: str = "llama3.2:3b"
+
+
+def _aggregate_category_metrics(runs):
+    categories = {}
+    for item in runs:
+        for category, metric in item.get("category_metrics", {}).items():
+            target = categories.setdefault(category, {"total_tasks": 0, "successful_tasks": 0})
+            target["total_tasks"] += metric.get("total_tasks", 0)
+            target["successful_tasks"] += metric.get("successful_tasks", 0)
+    for metric in categories.values():
+        metric["task_success_rate"] = (
+            metric["successful_tasks"] / metric["total_tasks"] if metric["total_tasks"] else 0.0
+        )
+    return categories
 
 
 @app.get("/api/health")
@@ -49,24 +64,61 @@ def compare_models(request: CompareRequest):
         raise HTTPException(status_code=400, detail="Model names cannot be empty")
     if len({model.casefold() for model in models}) != len(models):
         raise HTTPException(status_code=400, detail="Model names must be unique")
+
     comparisons = []
     try:
         for model in models:
-            result = save_run(run(request.provider, model))
+            model_runs = [save_run(run(request.provider, model))
+                          for _ in range(request.repetitions)]
+            rates = [item["task_success_rate"] for item in model_runs]
+            latencies = [item["average_latency_ms"] for item in model_runs]
+            total_tasks = sum(item["total_tasks"] for item in model_runs)
+            successful_tasks = sum(item["successful_tasks"] for item in model_runs)
             comparisons.append({
-                "run_id": result["run_id"], "model": result["model"],
-                "task_success_rate": result["task_success_rate"],
-                "successful_tasks": result["successful_tasks"], "total_tasks": result["total_tasks"],
-                "average_latency_ms": result["average_latency_ms"], "p95_latency_ms": result["p95_latency_ms"],
-                "tool_calls": result["tool_calls"], "tool_errors": result["tool_errors"],
-                "tool_call_success_rate": result["tool_call_success_rate"],
-                "category_metrics": result.get("category_metrics", {})})
+                "model": model,
+                "run_ids": [item["run_id"] for item in model_runs],
+                "repetitions": len(model_runs),
+                "task_success_rate": sum(rates) / len(rates),
+                "mean_task_success_rate": sum(rates) / len(rates),
+                "success_rate_min": min(rates),
+                "success_rate_max": max(rates),
+                "successful_tasks": successful_tasks,
+                "total_tasks": total_tasks,
+                "average_latency_ms": sum(latencies) / len(latencies),
+                "mean_latency_ms": sum(latencies) / len(latencies),
+                "p95_latency_ms": max(item["p95_latency_ms"] for item in model_runs),
+                "tool_calls": sum(item["tool_calls"] for item in model_runs),
+                "tool_errors": sum(item["tool_errors"] for item in model_runs),
+                "tool_call_success_rate": (
+                    sum(item["tool_calls"] - item["tool_errors"] for item in model_runs)
+                    / sum(item["tool_calls"] for item in model_runs)
+                    if sum(item["tool_calls"] for item in model_runs) else 1.0
+                ),
+                "category_metrics": _aggregate_category_metrics(model_runs),
+                "per_run": [{
+                    "run_id": item["run_id"],
+                    "task_success_rate": item["task_success_rate"],
+                    "average_latency_ms": item["average_latency_ms"],
+                } for item in model_runs],
+            })
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    ranked = sorted(comparisons, key=lambda item: (-item["task_success_rate"], item["average_latency_ms"]))
-    return {"provider": request.provider, "comparison_count": len(comparisons),
-            "ranking": ranked, "results": comparisons,
-            "ranking_rule": "Higher task success rate first; lower average latency breaks ties."}
+
+    ranked = sorted(comparisons, key=lambda item: (
+        -item["mean_task_success_rate"], item["mean_latency_ms"]
+    ))
+    return {
+        "provider": request.provider,
+        "repetitions": request.repetitions,
+        "comparison_count": len(comparisons),
+        "total_runs": len(comparisons) * request.repetitions,
+        "ranking": ranked,
+        "results": comparisons,
+        "ranking_rule": (
+            "Higher mean task success rate first; lower mean latency breaks ties. "
+            "Success-rate range shows run-to-run variability."
+        ),
+    }
 
 
 @app.post("/api/benchmark/history/{run_id}/judge")
