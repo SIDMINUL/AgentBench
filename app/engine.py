@@ -24,6 +24,10 @@ def _independent_verification(task: dict, candidate: str) -> dict | None:
         numerator, denominator = spec["fraction"]
         borrowed = spec["total"] * numerator // denominator
         reference = str(spec["total"] - borrowed + spec["returned"])
+    elif kind == "percentage_discount":
+        reference = str(spec["price"] * (100 - spec["percent"]) // 100)
+    elif kind == "ratio":
+        reference = str(spec["base_amount"] * spec["target_units"] // spec["base_units"])
     elif kind == "elapsed_time":
         hours, minutes = map(int, spec["start"].split(":"))
         total_minutes = hours * 60 + minutes + sum(spec["durations"])
