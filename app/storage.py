@@ -51,9 +51,22 @@ def list_runs(limit: int = 50) -> list[dict[str, Any]]:
     with _connect() as connection:
         rows = connection.execute(
             """SELECT id AS run_id, created_at, provider, model, task_success_rate,
-            average_latency_ms, total_tasks, successful_tasks
+            average_latency_ms, total_tasks, successful_tasks, result_json
             FROM benchmark_runs ORDER BY id DESC LIMIT ?""", (safe_limit,)).fetchall()
-    return [dict(row) for row in rows]
+
+    history = []
+    for row in rows:
+        item = dict(row)
+        saved_result = json.loads(item.pop("result_json") or "{}")
+        item["model_independent_task_success_rate"] = saved_result.get(
+            "model_independent_task_success_rate",
+            item["task_success_rate"],
+        )
+        item["engine_assisted_tool_calls"] = saved_result.get(
+            "engine_assisted_tool_calls", 0
+        )
+        history.append(item)
+    return history
 
 
 def get_run(run_id: int) -> dict[str, Any] | None:
