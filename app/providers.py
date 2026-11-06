@@ -181,6 +181,18 @@ REASONING AND VERIFICATION RULES:
         required_tool_calls_text = (
             json.dumps(pending_tool_calls) if pending_tool_calls else "None"
         )
+        retry_guidance = ""
+        if any(item.get("type") == "answer_retry_feedback" for item in history):
+            retry_guidance = """
+ANSWER SELF-CORRECTION:
+- Your previous answer was rejected by the benchmark's answer check.
+- Do not repeat it automatically. Re-read the task and observations from the beginning.
+- For arithmetic, recompute each operation independently and check the result.
+- For time calculations, add all durations (including breaks) in minutes before converting to HH:MM.
+- For inventory decisions, identify the exact returned stock value and evaluate the stated inequality.
+- For recovery tasks, use the successful fallback result, not the failed lookup.
+- Return one corrected final answer in the required format.
+"""
         forced_final_guidance = ""
         if any(
             item.get("type") == "tool_call_blocked_observations_complete"
@@ -226,6 +238,7 @@ FULL ACTION HISTORY: {json.dumps(history)}
 {recovery_guidance}
 {multi_tool_guidance}
 {comparison_guidance}
+{retry_guidance}
 {forced_final_guidance}
 
 STRICT ACTION RULES:
