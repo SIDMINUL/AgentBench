@@ -9,7 +9,7 @@ A reproducible platform for evaluating LLM agents on reasoning, planning, multi-
 - Execution traces containing tool arguments, observations, errors, and final answers
 - Deterministic exact-match task success, category-level success rates, tool-call success, average latency, and p95 latency
 - Independent deterministic verification for selected arithmetic/time tasks, preserving raw model answers and reporting suggested corrections separately
-- 12 benchmark tasks across reasoning, planning, tool use, and three failure-recovery scenarios
+- 22 benchmark tasks across reasoning, planning, tool use, and three failure-recovery scenarios
 - FastAPI API and Streamlit dashboard
 - SQLite persistence for CLI and API benchmark runs
 - Multi-model comparison using identical task sets
@@ -20,11 +20,11 @@ A reproducible platform for evaluating LLM agents on reasoning, planning, multi-
 
 | Category | Tasks | What is tested |
 |---|---:|---|
-| Reasoning | 4 | Arithmetic, multi-step arithmetic, and relational logic |
-| Planning | 2 | Dependency ordering and time-based scheduling |
-| Tool use | 3 | Single lookup, conditional decision, and multiple tool calls |
+| Reasoning | 8 | Arithmetic, percentages, ratios, relational ordering, and logical inference |
+| Planning | 6 | Multi-stage dependencies and time-based scheduling, including breaks |
+| Tool use | 5 | Inventory lookups, stock thresholds, conditional decisions, and multiple tool calls |
 | Failure recovery | 3 | Recovering from invalid SKUs using different fallback products and stock conditions |
-| **Total** | **12** | |
+| **Total** | **22** | |
 
 The benchmark uses a small deterministic inventory tool with known fixture data. Three failure-recovery tasks intentionally request unknown SKUs and require different valid fallback lookups. The execution engine blocks premature final answers until declared required tool observations (including both lookups in the multi-product comparison) and any required recovery lookup have succeeded. Run summaries report success rates separately for reasoning, planning, tool use, and failure recovery.
 
@@ -61,10 +61,10 @@ The mock provider is a deterministic fixture for testing the benchmark engine. I
 Use `POST /api/benchmark/compare` with at least two model names:
 
 ```json
-{"provider":"ollama","models":["qwen2.5:3b","llama3.2:3b","llama3:latest","llama2:latest"]}
+{"provider":"ollama","models":["qwen2.5:3b","llama3.2:3b","llama3:latest","llama2:latest"],"repetitions":3}
 ```
 
-The dashboard provides the same workflow. The default comparison includes Qwen 2.5 3B, Llama 3.2 3B, Llama 3, and Llama 2; verify that each model is installed locally with `ollama list` before running. Models run sequentially against the same task set and each run is saved to SQLite.
+The dashboard provides the same workflow. The default comparison includes Qwen 2.5 3B, Llama 3.2 3B, Llama 3, and Llama 2; verify that each model is installed locally with `ollama list` before running. Each model runs the same task set the requested number of times (1–5, default 1), and every individual run is saved to SQLite. Results report mean success rate, minimum/maximum success rate, mean latency, and aggregated category metrics. Rank by mean success rate, then mean latency.
 
 ## LLM-as-a-Judge
 
@@ -103,9 +103,9 @@ Runs are saved to `data/agentbench.db` by default. Set `AGENTBENCH_DB_PATH` to c
 - The inventory tool uses fixed fixture data; it does not connect to a live commerce system.
 - Latency depends on local hardware, model size, warm-up state, and Ollama configuration.
 - Selected arithmetic/time tasks have a deterministic verifier that recomputes answers from structured task data. It records the raw model answer, reference answer, and any suggested correction separately; it never overwrites the model output or changes the raw task-success score.
-- The verifier currently covers three templates: count after removal, fraction then return, and elapsed time. Other tasks are not independently verified by this mechanism.
-- Category-level metrics help isolate weaknesses, but the reasoning category currently contains only four tasks and should not be treated as a statistically robust score.
-- For meaningful comparisons, run each model multiple times, report variability, and keep task prompts and tool fixtures identical.
+- The verifier currently covers five templates: count after removal, fraction then return, elapsed time, percentage discount, and proportional ratio. Other tasks are not independently verified by this mechanism.
+- Category-level metrics help isolate weaknesses, but the reasoning category currently contains eight tasks and should not be treated as a statistically robust score.
+- For meaningful comparisons, use at least three repetitions when practical, report the observed success-rate range, and keep task prompts and tool fixtures identical. Repetitions improve visibility into run-to-run variability but do not make this compact task suite statistically representative.
 - LLM-as-a-Judge should be calibrated against human-reviewed examples before being treated as reliable.
 
 ## Safety
