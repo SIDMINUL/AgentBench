@@ -599,6 +599,33 @@ def test_ollama_multi_tool_prompt_explains_numeric_comparison(monkeypatch):
 
 
 
+def test_engine_retries_one_incorrect_final_answer():
+    from app.engine import run_task
+
+    class CorrectingProvider:
+        def __init__(self):
+            self.calls = 0
+
+        def next_action(self, task, history, model):
+            self.calls += 1
+            if self.calls == 1:
+                return {"type": "final", "answer": "11"}
+            assert any(item.get("type") == "answer_retry_feedback" for item in history)
+            return {"type": "final", "answer": "10"}
+
+    task = next(task for task in TASKS if task["id"] == "logic_001")
+    provider = CorrectingProvider()
+    result = run_task(task, provider, "mock", "self-correction-test")
+
+    assert result["success"] is True
+    assert result["output"] == "10"
+    assert result["answer_retry_used"] is True
+    assert any(
+        item["type"] == "final_answer_rejected_for_retry"
+        for item in result["trace"]
+    )
+
+
 def test_independent_verifier_reports_candidate_and_suggested_correction():
     from app.engine import run_task
 
