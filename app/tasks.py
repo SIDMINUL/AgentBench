@@ -107,5 +107,15 @@ TASKS = [
         "required_recovery": {"tool": "product_lookup", "arguments": {"sku": "SKU-RED-01"}},
         "tools": ["product_lookup"],
         "max_steps": 5,
-    },
+    },,
+    {"id":"math_003","category":"reasoning","prompt":"A jacket costs 80 dollars and is discounted by 25%. What is the sale price? Reply with the number only.","expected":"60","verification_spec":{"kind":"percentage_discount","price":80,"percent":25},"mock_answer":"60","tools":[],"max_steps":3},
+    {"id":"math_004","category":"reasoning","prompt":"A recipe uses 3 cups of flour for 12 muffins. How many cups are needed for 20 muffins at the same ratio? Reply with the number only.","expected":"5","verification_spec":{"kind":"ratio","base_amount":3,"base_units":12,"target_units":20},"mock_answer":"5","tools":[],"max_steps":3},
+    {"id":"logic_003","category":"reasoning","prompt":"Mira finished ahead of Noor. Noor finished ahead of Omar. Who finished last? Reply with the name only.","expected":"Omar","mock_answer":"Omar","tools":[],"max_steps":3},
+    {"id":"logic_004","category":"reasoning","prompt":"All tulips in a garden are flowers. Some flowers are yellow. Can we conclude that some tulips are yellow? Reply YES or NO only.","expected":"NO","mock_answer":"NO","tools":[],"max_steps":3},
+    {"id":"planning_003","category":"planning","prompt":"A task starts at 14:20 and takes 50 minutes, then a 15-minute break, then 40 minutes of work. Give the finish time in HH:MM.","expected":"16:05","verification_spec":{"kind":"elapsed_time","start":"14:20","durations":[50,15,40]},"mock_answer":"16:05","tools":[],"max_steps":3},
+    {"id":"planning_004","category":"planning","prompt":"A release requires design before development, development before testing, and testing before launch. Return the valid order as comma-separated words.","expected":"design, development, testing, launch","mock_answer":"design, development, testing, launch","tools":[],"max_steps":3},
+    {"id":"planning_005","category":"planning","prompt":"You have tasks taking 20, 35, and 15 minutes, plus a 10-minute break after the second task. Starting at 10:00, when do you finish? Reply HH:MM.","expected":"11:20","verification_spec":{"kind":"elapsed_time","start":"10:00","durations":[20,35,10,15]},"mock_answer":"11:20","tools":[],"max_steps":3},
+    {"id":"planning_006","category":"planning","prompt":"A report has four stages: collect data, clean data, analyze data, publish report. Return the order comma-separated.","expected":"collect data, clean data, analyze data, publish report","mock_answer":"collect data, clean data, analyze data, publish report","tools":[],"max_steps":3},
+    {"id":"multi_004","category":"tool_use","prompt":"Look up SKU-RED-01. If its stock is greater than 20, answer HIGH; otherwise answer NORMAL.","expected":"HIGH","mock_answer":"HIGH","tools":["product_lookup"],"max_steps":4,"required_tool_calls":[{"tool":"product_lookup","arguments":{"sku":"SKU-RED-01"}}]},
+    {"id":"multi_005","category":"tool_use","prompt":"Look up SKU-BLUE-02. If its stock is 5 or less, answer LOW; otherwise answer SUFFICIENT.","expected":"LOW","mock_answer":"LOW","tools":["product_lookup"],"max_steps":4,"required_tool_calls":[{"tool":"product_lookup","arguments":{"sku":"SKU-BLUE-02"}}]}
 ]
