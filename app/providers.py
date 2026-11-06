@@ -222,11 +222,11 @@ MULTI-STEP TOOL REQUIREMENTS:
         if task.get("id") == "multi_003":
             comparison_guidance = """
 NUMERIC COMPARISON TASK:
-- This task asks which SKU has MORE stock, not which SKU was looked up first or last.
-- Read the numeric stock field from BOTH successful product_lookup results.
-- Compare the two integers directly. The larger stock number wins.
-- In this benchmark, SKU-BLUE-02 has stock 4 and SKU-RED-01 has stock 27; therefore 27 > 4 and the correct answer is SKU-RED-01.
-- Do not select the first SKU, the last SKU, or the SKU with lower stock.
+- Identify the exact comparison requested by the task (more, less, highest, lowest, etc.).
+- Read the numeric stock field from EVERY required successful product_lookup result.
+- Compare the returned integers directly, then select the SKU that satisfies the requested comparison.
+- Do not infer stock from SKU names, lookup order, product names, or prior examples.
+- Do not select the first or last SKU automatically.
 """
         prompt = f"""
 You are a reliable agent completing one benchmark task.
