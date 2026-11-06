@@ -804,6 +804,10 @@ def test_groq_provider_uses_hosted_chat_api_and_structured_json(monkeypatch):
         "product_lookup"
     ]
     assert tool_schema["additionalProperties"] is False
+
+    # Tool-enabled tasks must use Groq JSON Object Mode, not Structured Outputs.
+    tool_payload = captured["payload"]
+    assert tool_payload["response_format"] == {"type": "json_object"}
     assert captured["payload"]["reasoning_effort"] == "medium"
     assert "GROQ_API_KEY" not in captured["payload"]["messages"][1]["content"]
 
