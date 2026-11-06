@@ -636,3 +636,42 @@ def test_run_reports_independent_verification_coverage():
     assert result["verification_metrics"]["raw_correct"] == 5
     assert result["verification_metrics"]["raw_accuracy"] == 1.0
     assert result["verification_metrics"]["correction_applied"] is False
+
+
+
+def test_compare_endpoint_aggregates_repeated_runs(monkeypatch, tmp_path):
+    from app import main, storage
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(storage, "DATABASE_PATH", tmp_path / "repeated.db")
+    counts = {"model-a": 0, "model-b": 0}
+
+    def fake_run(provider, model):
+        counts[model] += 1
+        rate = (0.5, 1.0)[counts[model] - 1] if model == "model-a" else 0.75
+        return {
+            "provider": provider, "model": model,
+            "task_success_rate": rate,
+            "successful_tasks": int(rate * 22), "total_tasks": 22,
+            "average_latency_ms": 100.0 if model == "model-a" else 50.0,
+            "p95_latency_ms": 120.0, "tool_calls": 2, "tool_errors": 0,
+            "tool_call_success_rate": 1.0, "category_metrics": {}, "results": [],
+        }
+
+    monkeypatch.setattr(main, "run", fake_run)
+    response = TestClient(main.app).post(
+        "/api/benchmark/compare",
+        json={"provider": "ollama", "models": ["model-a", "model-b"], "repetitions": 2},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_runs"] == 4
+    assert data["repetitions"] == 2
+    assert len(storage.list_runs()) == 4
+    result_a = next(item for item in data["results"] if item["model"] == "model-a")
+    assert result_a["mean_task_success_rate"] == 0.75
+    assert result_a["success_rate_min"] == 0.5
+    assert result_a["success_rate_max"] == 1.0
+    assert len(result_a["run_ids"]) == 2
+    assert data["ranking"][0]["model"] == "model-b"
