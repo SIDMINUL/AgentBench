@@ -176,7 +176,11 @@ def test_compare_endpoint_runs_and_saves_each_model(monkeypatch, tmp_path):
         "tool_call_success_rate": 1.0, "results": []})
     response = TestClient(main.app).post(
         "/api/benchmark/compare",
-        json={"provider": "ollama", "models": ["model-a", "model-b"]},
+        json={
+            "provider": "ollama",
+            "models": ["model-a", "model-b"],
+            "repetitions": 1,
+        },
     )
     assert response.status_code == 200
     assert response.json()["ranking"][0]["model"] == "model-a"
@@ -788,10 +792,16 @@ def test_groq_provider_uses_hosted_chat_api_and_structured_json(monkeypatch):
     assert response_format["type"] == "json_schema"
     assert response_format["json_schema"]["strict"] is True
     schema = response_format["json_schema"]["schema"]
-    assert len(schema["anyOf"]) == 2
+    assert len(schema["anyOf"]) == 1
     assert schema["anyOf"][0]["properties"]["type"]["enum"] == ["final"]
-    assert schema["anyOf"][1]["properties"]["type"]["enum"] == ["tool_call"]
-    assert schema["anyOf"][1]["properties"]["tool"]["enum"] == ["product_lookup"]
+
+    tool_task = next(task for task in TASKS if task["id"] == "multi_001")
+    GroqProvider().next_action(tool_task, [], "openai/gpt-oss-120b")
+    tool_schema = captured["payload"]["response_format"]["json_schema"]["schema"]
+    assert len(tool_schema["anyOf"]) == 2
+    assert tool_schema["anyOf"][0]["properties"]["type"]["enum"] == ["final"]
+    assert tool_schema["anyOf"][1]["properties"]["type"]["enum"] == ["tool_call"]
+    assert tool_schema["anyOf"][1]["properties"]["tool"]["enum"] == ["product_lookup"]
     assert captured["payload"]["reasoning_effort"] == "medium"
     assert "GROQ_API_KEY" not in captured["payload"]["messages"][1]["content"]
 
