@@ -1,7 +1,6 @@
 import json
-import httpx
 
-from app.config import settings
+from app.providers import groq_chat_completion
 from app.tasks import TASKS
 
 
@@ -56,19 +55,15 @@ DATA:
 {json.dumps(payload, ensure_ascii=False)}
 """
 
-    response = httpx.post(
-        f"{settings.ollama_base_url.rstrip('/')}/api/generate",
-        json={
-            "model": judge_model,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",
-            "options": {"temperature": 0},
-        },
-        timeout=max(settings.request_timeout_seconds, 120),
+    raw = groq_chat_completion(
+        model=judge_model,
+        system_prompt=(
+            "You are an impartial evaluator. Return only a valid JSON object. "
+            "Do not add markdown or prose outside JSON."
+        ),
+        user_prompt=prompt,
+        max_completion_tokens=8192,
     )
-    response.raise_for_status()
-    raw = response.json().get("response", "")
 
     try:
         parsed = json.loads(raw)
@@ -129,6 +124,7 @@ DATA:
     # Average unrounded task scores to avoid cumulative rounding drift.
     average = overall_score_sum / len(normalized)
     return {
+        "judge_provider": "groq",
         "judge_model": judge_model,
         "average_overall_score": round(average, 2),
         "evaluations": [normalized[item["task_id"]] for item in result["results"]],
