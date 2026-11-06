@@ -798,12 +798,6 @@ def test_groq_provider_uses_hosted_chat_api_and_structured_json(monkeypatch):
 
     tool_task = next(task for task in TASKS if task["id"] == "multi_001")
     GroqProvider().next_action(tool_task, [], "openai/gpt-oss-120b")
-    tool_schema = captured["payload"]["response_format"]["json_schema"]["schema"]
-    assert tool_schema["properties"]["type"]["enum"] == ["final", "tool_call"]
-    assert tool_schema["properties"]["tool"]["anyOf"][0]["enum"] == [
-        "product_lookup"
-    ]
-    assert tool_schema["additionalProperties"] is False
 
     # Tool-enabled tasks must use Groq JSON Object Mode, not Structured Outputs.
     tool_payload = captured["payload"]
