@@ -508,38 +508,41 @@ Return one tool_call if a required observation is missing. Otherwise return one 
 """
 
         can_call_product_lookup = "product_lookup" in allowed_tools
-        arguments_schema = (
-            {
-                "anyOf": [
-                    {
+        required_action_fields = [
+            "type", "answer", "evidence", "tool", "arguments"
+        ]
+        final_action_schema = {
+            "type": "object",
+            "properties": {
+                "type": {"type": "string", "enum": ["final"]},
+                "answer": {"type": "string"},
+                "evidence": {"type": "string"},
+                "tool": {"type": "null"},
+                "arguments": {"type": "null"},
+            },
+            "required": required_action_fields,
+            "additionalProperties": False,
+        }
+        action_variants = [final_action_schema]
+        if can_call_product_lookup:
+            action_variants.append({
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "enum": ["tool_call"]},
+                    "answer": {"type": "null"},
+                    "evidence": {"type": "null"},
+                    "tool": {"type": "string", "enum": ["product_lookup"]},
+                    "arguments": {
                         "type": "object",
                         "properties": {"sku": {"type": "string"}},
                         "required": ["sku"],
                         "additionalProperties": False,
                     },
-                    {"type": "null"},
-                ]
-            }
-            if can_call_product_lookup else {"type": "null"}
-        )
-        response_schema = {
-            "type": "object",
-            "properties": {
-                "type": {
-                    "type": "string",
-                    "enum": ["final", "tool_call"] if allowed_tools else ["final"],
                 },
-                "answer": {"type": ["string", "null"]},
-                "evidence": {"type": ["string", "null"]},
-                "tool": (
-                    {"type": ["string", "null"]}
-                    if can_call_product_lookup else {"type": "null"}
-                ),
-                "arguments": arguments_schema,
-            },
-            "required": ["type", "answer", "evidence", "tool", "arguments"],
-            "additionalProperties": False,
-        }
+                "required": required_action_fields,
+                "additionalProperties": False,
+            })
+        response_schema = {"anyOf": action_variants}
         raw = groq_chat_completion(
             model=model,
             system_prompt=system_prompt,
