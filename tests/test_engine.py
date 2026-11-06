@@ -784,9 +784,11 @@ def test_groq_provider_uses_hosted_chat_api_and_structured_json(monkeypatch):
     response_format = captured["payload"]["response_format"]
     assert response_format["type"] == "json_schema"
     assert response_format["json_schema"]["strict"] is True
-    assert response_format["json_schema"]["schema"]["required"] == [
-        "type", "answer", "evidence", "tool", "arguments"
-    ]
+    schema = response_format["json_schema"]["schema"]
+    assert len(schema["anyOf"]) == 2
+    assert schema["anyOf"][0]["properties"]["type"]["enum"] == ["final"]
+    assert schema["anyOf"][1]["properties"]["type"]["enum"] == ["tool_call"]
+    assert schema["anyOf"][1]["properties"]["tool"]["enum"] == ["product_lookup"]
     assert captured["payload"]["reasoning_effort"] == "medium"
     assert "GROQ_API_KEY" not in captured["payload"]["messages"][1]["content"]
 
