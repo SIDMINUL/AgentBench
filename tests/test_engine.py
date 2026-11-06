@@ -781,7 +781,12 @@ def test_groq_provider_uses_hosted_chat_api_and_structured_json(monkeypatch):
     assert captured["url"] == "https://api.groq.com/openai/v1/chat/completions"
     assert captured["headers"]["Authorization"] == "Bearer test-groq-key"
     assert captured["payload"]["model"] == "openai/gpt-oss-120b"
-    assert captured["payload"]["response_format"] == {"type": "json_object"}
+    response_format = captured["payload"]["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is True
+    assert response_format["json_schema"]["schema"]["required"] == [
+        "type", "answer", "evidence", "tool", "arguments"
+    ]
     assert captured["payload"]["reasoning_effort"] == "medium"
     assert "GROQ_API_KEY" not in captured["payload"]["messages"][1]["content"]
 
@@ -856,3 +861,53 @@ def test_groq_retry_prompt_includes_the_rejected_candidate(monkeypatch):
     prompt = captured["payload"]["messages"][1]["content"]
     assert "Previous answer: 13" in prompt
     assert "Do not repeat it" in prompt
+
+
+def test_comparison_ranks_by_model_independent_success_not_pipeline_success(
+    monkeypatch, tmp_path
+):
+    from app import main, storage
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(storage, "DATABASE_PATH", tmp_path / "autonomous-ranking.db")
+
+    def fake_run(provider, model):
+        pipeline_rate, independent_rate, latency = (
+            (1.0, 0.40, 100.0) if model == "assisted-model"
+            else (0.75, 0.75, 150.0)
+        )
+        return {
+            "provider": provider,
+            "model": model,
+            "task_success_rate": pipeline_rate,
+            "successful_tasks": round(pipeline_rate * 20),
+            "total_tasks": 20,
+            "model_independent_task_success_rate": independent_rate,
+            "model_independent_successful_tasks": round(independent_rate * 20),
+            "engine_assisted_tool_calls": 2 if model == "assisted-model" else 0,
+            "average_latency_ms": latency,
+            "p95_latency_ms": latency,
+            "tool_calls": 2,
+            "tool_errors": 0,
+            "duplicate_tool_calls": 0,
+            "category_metrics": {},
+            "results": [],
+        }
+
+    monkeypatch.setattr(main, "run", fake_run)
+    response = TestClient(main.app).post(
+        "/api/benchmark/compare",
+        json={
+            "provider": "groq",
+            "models": ["assisted-model", "autonomous-model"],
+            "repetitions": 1,
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ranking"][0]["model"] == "autonomous-model"
+    assisted = next(
+        item for item in data["results"] if item["model"] == "assisted-model"
+    )
+    assert assisted["mean_task_success_rate"] == 1.0
+    assert assisted["mean_model_independent_task_success_rate"] == 0.4
