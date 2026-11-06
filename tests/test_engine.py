@@ -195,6 +195,9 @@ def test_compare_endpoint_rejects_duplicate_models():
 
 def test_judge_run_uses_deterministic_correctness_and_tool_scores(monkeypatch):
     from app import judge
+    from app.providers import settings
+
+    monkeypatch.setattr(settings, "groq_api_key", "test-groq-key")
 
     class FakeResponse:
         def raise_for_status(self):
