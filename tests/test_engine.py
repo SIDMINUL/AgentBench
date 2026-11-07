@@ -875,8 +875,8 @@ def test_groq_retry_prompt_includes_the_rejected_candidate(monkeypatch):
     }]
     GroqProvider().next_action(task, history, "openai/gpt-oss-120b")
     prompt = captured["payload"]["messages"][1]["content"]
-    assert "Previous answer: 13" in prompt
-    assert "Do not repeat it" in prompt
+    assert '"answer": "13"' in prompt
+    assert "do not repeat it" in prompt
 
 
 def test_comparison_ranks_by_model_independent_success_not_pipeline_success(
@@ -1037,6 +1037,7 @@ def test_benchmark_stops_and_marks_remaining_tasks_skipped_after_groq_limit(
     assert result["attempted_tasks"] == 1
     assert result["skipped_tasks"] == len(TASKS) - 1
     assert result["total_tasks"] == len(TASKS)
+    assert result["p95_latency_ms"] == result["average_latency_ms"]
     assert result["results"][0]["status"] == "rate_limited"
     assert all(
         item["status"] == "skipped_rate_limit"
