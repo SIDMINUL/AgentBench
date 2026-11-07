@@ -1,4 +1,6 @@
 import json
+import re
+import time
 import httpx
 from app.config import settings
 
@@ -336,8 +338,8 @@ def _parse_seconds(value: str | None) -> float | None:
     except ValueError:
         pass
 
-    minutes = re.search(r"([0-9.]+)\\s*m", value, re.IGNORECASE)
-    seconds = re.search(r"([0-9.]+)\\s*s", value, re.IGNORECASE)
+    minutes = re.search(r"([0-9.]+)\s*m", value, re.IGNORECASE)
+    seconds = re.search(r"([0-9.]+)\s*s", value, re.IGNORECASE)
     if not minutes and not seconds:
         return None
     return (
@@ -431,7 +433,7 @@ def groq_chat_completion(
                     )
                 if retry_after is None:
                     match = re.search(
-                        r"try again in\\s+([0-9.]+)\\s*s",
+                        r"try again in\s+([0-9.]+)\s*s",
                         detail,
                         re.IGNORECASE,
                     )
