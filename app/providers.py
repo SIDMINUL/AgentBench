@@ -317,15 +317,44 @@ Do not invent tool results or claim a tool was called unless you return a tool_c
         raise ValueError(f"Model returned an unsupported action schema: {raw[:500]}")
 
 
+class GroqRateLimitError(ValueError):
+    """Raised when Groq rate limits cannot be cleared within the retry budget."""
+
+    rate_limited = True
+
+    def __init__(self, message: str, retry_after_seconds: float | None = None):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
+def _parse_seconds(value: str | None) -> float | None:
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+
+    minutes = re.search(r"([0-9.]+)\\s*m", value, re.IGNORECASE)
+    seconds = re.search(r"([0-9.]+)\\s*s", value, re.IGNORECASE)
+    if not minutes and not seconds:
+        return None
+    return (
+        (float(minutes.group(1)) * 60 if minutes else 0.0)
+        + (float(seconds.group(1)) if seconds else 0.0)
+    )
+
+
 def groq_chat_completion(
     model: str,
     system_prompt: str,
     user_prompt: str,
     *,
-    max_completion_tokens: int = 2048,
+    max_completion_tokens: int = 512,
     response_schema: dict | None = None,
 ) -> str:
-    """Call Groq's OpenAI-compatible Chat Completions API and return message content."""
+    """Call Groq with bounded, header-aware handling for transient rate limits."""
     api_key = (settings.groq_api_key or "").strip()
     if not api_key:
         raise ValueError(
@@ -340,7 +369,9 @@ def groq_chat_completion(
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.1,
-        "max_completion_tokens": max_completion_tokens,
+        "max_completion_tokens": min(
+            max_completion_tokens, settings.groq_completion_tokens
+        ),
     }
     if response_schema:
         payload["response_format"] = {
@@ -353,55 +384,139 @@ def groq_chat_completion(
         }
     else:
         payload["response_format"] = {"type": "json_object"}
-    # These reasoning controls are documented for GPT-OSS and Qwen3.8 models.
     if model.startswith("openai/gpt-oss") or model.startswith("qwen/qwen3.8"):
-        payload["reasoning_effort"] = "medium"
+        payload["reasoning_effort"] = settings.groq_reasoning_effort
 
-    try:
-        response = httpx.post(
-            f"{settings.groq_base_url.rstrip('/')}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=max(settings.request_timeout_seconds, 90),
-        )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code
+    endpoint = f"{settings.groq_base_url.rstrip('/')}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    max_retries = max(0, settings.groq_max_retries)
+    response = None
+
+    for attempt in range(max_retries + 1):
         try:
-            error_data = exc.response.json()
-            detail = (
-                error_data.get("error", {}).get("message")
-                if isinstance(error_data, dict) else None
+            response = httpx.post(
+                endpoint,
+                headers=headers,
+                json=payload,
+                timeout=max(settings.request_timeout_seconds, 90),
             )
-        except (ValueError, TypeError):
-            detail = None
-        detail = str(detail or "No error details returned by Groq.")
-        if status_code == 401:
-            message = "Groq rejected GROQ_API_KEY (401). Check that the key is valid."
-        elif status_code == 403:
-            message = (
-                f"Groq denied access to model '{model}' (403). Check model access, "
-                "project permissions, and account limits."
-            )
-        elif status_code == 404:
-            message = f"Groq model or endpoint was not found (404): {model}."
-        elif status_code == 429:
-            message = (
-                "Groq rate limit or quota reached (429). Check your Groq usage "
-                "and plan limits, then retry."
-            )
-        else:
-            message = f"Groq API request failed ({status_code})."
-        raise ValueError(f"{message} {detail}") from exc
-    except httpx.TimeoutException as exc:
-        raise ValueError(
-            "Groq request timed out. Increase REQUEST_TIMEOUT_SECONDS or retry."
-        ) from exc
-    except httpx.RequestError as exc:
-        raise ValueError(f"Could not reach Groq API: {exc}") from exc
+            response.raise_for_status()
+            break
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            response_headers = exc.response.headers
+            try:
+                error_data = exc.response.json()
+                error_info = (
+                    error_data.get("error", {})
+                    if isinstance(error_data, dict) else {}
+                )
+                detail = error_info.get("message")
+                error_type = str(error_info.get("type", "")).casefold()
+                error_code = str(error_info.get("code", "")).casefold()
+            except (ValueError, TypeError):
+                detail = None
+                error_type = ""
+                error_code = ""
+
+            detail = str(detail or "No error details returned by Groq.")
+            if status_code == 429:
+                retry_after = _parse_seconds(response_headers.get("retry-after"))
+                if retry_after is None:
+                    retry_after = _parse_seconds(
+                        response_headers.get("x-ratelimit-reset-tokens")
+                    )
+                if retry_after is None:
+                    match = re.search(
+                        r"try again in\\s+([0-9.]+)\\s*s",
+                        detail,
+                        re.IGNORECASE,
+                    )
+                    if match:
+                        retry_after = float(match.group(1))
+
+                daily_limit = any(
+                    phrase in detail.casefold()
+                    for phrase in (
+                        "tokens per day", "requests per day",
+                        "daily token", "daily request",
+                    )
+                )
+                headers_summary = {
+                    "remaining_tokens": response_headers.get(
+                        "x-ratelimit-remaining-tokens"
+                    ),
+                    "reset_tokens": response_headers.get(
+                        "x-ratelimit-reset-tokens"
+                    ),
+                    "remaining_requests": response_headers.get(
+                        "x-ratelimit-remaining-requests"
+                    ),
+                    "reset_requests": response_headers.get(
+                        "x-ratelimit-reset-requests"
+                    ),
+                }
+                header_text = ", ".join(
+                    f"{key}={value}" for key, value in headers_summary.items()
+                    if value is not None
+                )
+                if (
+                    not daily_limit
+                    and retry_after is not None
+                    and retry_after <= settings.groq_max_retry_wait_seconds
+                    and attempt < max_retries
+                ):
+                    time.sleep(max(retry_after, 0.25))
+                    continue
+
+                if daily_limit:
+                    guidance = (
+                        "A daily Groq quota is exhausted; waiting a few seconds "
+                        "will not fix it. Check your Groq Limits page or upgrade "
+                        "the plan."
+                    )
+                elif retry_after is not None:
+                    guidance = (
+                        f"Groq says to retry in {retry_after:.1f}s, which exceeds "
+                        "the configured automatic-wait limit or retry budget."
+                    )
+                else:
+                    guidance = (
+                        "No usable retry window was supplied. Check the Groq "
+                        "Limits page for the exhausted counter."
+                    )
+                if header_text:
+                    header_text = f" Rate headers: {header_text}."
+                raise GroqRateLimitError(
+                    f"Groq rate limit reached (429). {guidance} "
+                    f"API detail: {detail}.{header_text}",
+                    retry_after_seconds=retry_after,
+                ) from exc
+
+            if status_code == 401:
+                message = "Groq rejected GROQ_API_KEY (401). Check that the key is valid."
+            elif status_code == 403:
+                message = (
+                    f"Groq denied access to model '{model}' (403). Check model access, "
+                    "project permissions, and account limits."
+                )
+            elif status_code == 404:
+                message = f"Groq model or endpoint was not found (404): {model}."
+            else:
+                message = f"Groq API request failed ({status_code})."
+            raise ValueError(f"{message} {detail}") from exc
+        except httpx.TimeoutException as exc:
+            raise ValueError(
+                "Groq request timed out. Increase REQUEST_TIMEOUT_SECONDS or retry."
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ValueError(f"Could not reach Groq API: {exc}") from exc
+
+    if response is None:
+        raise ValueError("Groq request ended without a response.")
 
     try:
         data = response.json()
@@ -554,7 +669,7 @@ Return one tool_call if a required observation is missing. Otherwise return one 
             model=model,
             system_prompt=system_prompt,
             user_prompt=prompt,
-            max_completion_tokens=2048,
+            max_completion_tokens=settings.groq_completion_tokens,
             # Groq's structured-output mode is not compatible with tool use.
             # Tool-enabled tasks return JSON actions using JSON Object Mode instead.
             response_schema=(
