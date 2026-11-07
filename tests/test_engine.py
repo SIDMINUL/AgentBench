@@ -961,7 +961,7 @@ def test_groq_completion_retries_after_tpm_reset_header(monkeypatch):
     )
     succeeded = httpx.Response(
         200,
-        json={"choices": [{"message": {"content": "{\\"type\\":\\"final\\"}"}}]},
+        json={"choices": [{"message": {"content": '{"type":"final"}'}}]},
         request=request,
     )
 
