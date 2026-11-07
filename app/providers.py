@@ -735,7 +735,7 @@ RULES:
             return {
                 "type": "final",
                 "answer": "",
-                "evidence": "The model returned an empty JSON object.",
+                "evidence": "The model returned an empty action object.",
             }
         if not isinstance(action, dict) or action.get("type") != "final":
             raise ValueError(
