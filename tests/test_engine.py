@@ -1114,3 +1114,81 @@ def test_benchmark_stops_and_marks_remaining_tasks_skipped_after_groq_limit(
         item["status"] == "skipped_rate_limit"
         for item in result["results"][1:]
     )
+
+
+def test_groq_multi_lookup_uses_native_function_calls_until_all_observations_exist(
+    monkeypatch,
+):
+    import json
+    from app.providers import GroqProvider, settings
+
+    captured = []
+    sku_responses = ["SKU-BLUE-02", "SKU-RED-01"]
+
+    class FakeResponse:
+        def __init__(self, message):
+            self.message = message
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": self.message}]}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured.append(json)
+        if json.get("tools"):
+            sku = sku_responses.pop(0)
+            message = {
+                "content": None,
+                "tool_calls": [{
+                    "id": f"call_{len(captured)}",
+                    "type": "function",
+                    "function": {
+                        "name": "product_lookup",
+                        "arguments": json_module.dumps({"sku": sku}),
+                    },
+                }],
+            }
+        else:
+            message = {
+                "content": json_module.dumps({
+                    "type": "final",
+                    "answer": "SKU-RED-01",
+                    "evidence": "RED has more stock than BLUE.",
+                })
+            }
+        return FakeResponse(message)
+
+    json_module = json
+    monkeypatch.setattr(settings, "groq_api_key", "test-key")
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+
+    task = next(task for task in TASKS if task["id"] == "multi_003")
+    provider = GroqProvider()
+
+    first = provider.next_action(task, [], "openai/gpt-oss-120b")
+    assert first["arguments"]["sku"] == "SKU-BLUE-02"
+
+    blue_result = {
+        "type": "tool_result",
+        "tool": "product_lookup",
+        "result": {"sku": "SKU-BLUE-02", "stock": 4},
+    }
+    second = provider.next_action(task, [blue_result], "openai/gpt-oss-120b")
+    assert second["arguments"]["sku"] == "SKU-RED-01"
+
+    red_result = {
+        "type": "tool_result",
+        "tool": "product_lookup",
+        "result": {"sku": "SKU-RED-01", "stock": 27},
+    }
+    final = provider.next_action(
+        task, [blue_result, red_result], "openai/gpt-oss-120b"
+    )
+    assert final["type"] == "final"
+    assert final["answer"] == "SKU-RED-01"
+    assert captured[0]["tool_choice"] == "required"
+    assert captured[1]["tool_choice"] == "required"
+    assert "tools" not in captured[2]
+    assert captured[2]["response_format"]["type"] == "json_schema"
