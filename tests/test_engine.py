@@ -23,7 +23,11 @@ def test_benchmark_covers_all_task_categories():
 def test_benchmark_reports_category_level_metrics():
     result = run("mock", "mock-agent")
     assert result["category_metrics"]["reasoning"] == {
-        "total_tasks": 8, "successful_tasks": 8, "task_success_rate": 1.0
+        "total_tasks": 8,
+        "attempted_tasks": 8,
+        "skipped_tasks": 0,
+        "successful_tasks": 8,
+        "task_success_rate": 1.0,
     }
     assert result["category_metrics"]["planning"]["total_tasks"] == 6
     assert result["category_metrics"]["tool_use"]["successful_tasks"] == 5
