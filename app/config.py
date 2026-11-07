@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     default_judge_model: str = "openai/gpt-oss-120b"
     ollama_base_url: str = "http://localhost:11434"
     request_timeout_seconds: int = 120
+    groq_max_retries: int = 2
+    groq_max_retry_wait_seconds: int = 60
+    groq_completion_tokens: int = 512
+    groq_reasoning_effort: str = "low"
 
     model_config = SettingsConfigDict(
         env_file=".env",
