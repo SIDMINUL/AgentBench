@@ -20,6 +20,14 @@ services:
         value: /var/data/agentbench.db
       - key: REQUEST_TIMEOUT_SECONDS
         value: "120"
+      - key: GROQ_MAX_RETRIES
+        value: "2"
+      - key: GROQ_MAX_RETRY_WAIT_SECONDS
+        value: "60"
+      - key: GROQ_COMPLETION_TOKENS
+        value: "512"
+      - key: GROQ_REASONING_EFFORT
+        value: low
 
   - type: web
     name: agentbench-dashboard
