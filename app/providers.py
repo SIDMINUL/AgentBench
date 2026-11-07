@@ -574,54 +574,49 @@ class GroqProvider:
         )
 
         system_prompt = (
-            "You are an accurate tool-using benchmark agent. Follow the task literally. "
-            "Use only supplied observations; never invent tool results. "
-            "Return one JSON object and no markdown. For a final answer, use "
-            "{\"type\":\"final\",\"answer\":\"exact answer\","
-            "\"evidence\":\"one-sentence verification summary\"}. "
-            "For a tool call, use "
-            "{\"type\":\"tool_call\",\"tool\":\"product_lookup\","
-            "\"arguments\":{\"sku\":\"SKU-RED-01\"}}. "
-            "Evidence is a concise audit note, not hidden chain-of-thought."
+            "You are a reliable benchmark agent. Follow the task exactly and use "
+            "only observed tool results. Return one JSON object, no markdown. "
+            "Final: {\"type\":\"final\",\"answer\":\"exact answer\","
+            "\"evidence\":\"brief verification\",\"tool\":null,\"arguments\":null}. "
+            "Tool: {\"type\":\"tool_call\",\"answer\":null,\"evidence\":null,"
+            "\"tool\":\"product_lookup\",\"arguments\":{\"sku\":\"SKU-RED-01\"}}. "
+            "Evidence is a short audit note, not hidden chain-of-thought."
         )
 
+        tool_errors = [
+            item for item in history if item.get("type") == "tool_error"
+        ]
+        previous_retry = next(
+            (item for item in reversed(history)
+             if item.get("type") == "answer_retry_feedback"),
+            None,
+        )
         prompt = f"""
-BENCHMARK TASK
-{task["prompt"]}
+TASK: {task["prompt"]}
+ALLOWED TOOLS: {json.dumps(allowed_tools)}
+REQUIRED LOOKUPS STILL MISSING: {json.dumps(pending_calls) if pending_calls else "None"}
+RECOVERY LOOKUP: {json.dumps(recovery) if recovery and not recovery_completed else "None"}
+TOOL RESULTS: {json.dumps(completed_results, ensure_ascii=False)}
+TOOL ERRORS: {json.dumps(tool_errors, ensure_ascii=False)}
+PREVIOUS REJECTED ANSWER: {
+    json.dumps({
+        "answer": previous_retry.get("candidate_answer"),
+        "evidence": previous_retry.get("candidate_evidence"),
+    }) if previous_retry else "None"
+}
 
-ALLOWED TOOLS
-{json.dumps(allowed_tools)}
+RULES:
+- Complete each missing required lookup before answering.
+- A failed lookup gives no stock data. After failure, use the specified fallback SKU.
+- After fallback, apply that task's condition to the returned stock. Do not reuse another task's answer.
+- Apply inequalities literally: below <, above >, at least >=, at most <=.
+- Arithmetic: calculate each operation in order; discount means subtract discount from price; ratio means scale per unit.
+- Time: add every duration and break in minutes, then convert to HH:MM.
+- Logic: do not assume groups overlap unless premises prove it. Respect every dependency.
+- Reply using the exact answer format requested. Keep evidence to one short sentence.
+- If the previous answer was rejected, independently recalculate and do not repeat it.
 
-REQUIRED TOOL CALLS STILL OUTSTANDING
-{json.dumps(pending_calls) if pending_calls else "None"}
-
-REQUIRED RECOVERY ACTION
-{json.dumps(recovery) if recovery and not recovery_completed else "None"}
-
-SUCCESSFUL TOOL OBSERVATIONS
-{json.dumps(completed_results, ensure_ascii=False)}
-
-FULL ACTION HISTORY
-{json.dumps(history, ensure_ascii=False)}
-
-DECISION RULES
-- If REQUIRED TOOL CALLS STILL OUTSTANDING is not None, call the next outstanding tool now.
-- If a lookup failed, its error contains no product stock. Perform the specified recovery lookup using its different SKU.
-- After a successful fallback lookup, apply the condition in the original task to that returned stock value. Do not carry over the answer from another recovery task.
-- For stock rules, apply inequalities literally: below N is < N; above N is > N; at least N is >= N; greater than N is > N; N or less is <= N.
-- For arithmetic, write the numeric expression out before evaluating it. For a fraction change, calculate the fraction of the original total, subtract it, then apply returns. For a discount, subtract the discount amount from the original price. For a ratio, calculate one unit's amount before scaling.
-- For time questions, add every duration and break in minutes to the start time, then convert once to HH:MM. Check the total elapsed minutes.
-- For ordering questions, respect every stated dependency. For "all" and "some" logic, do not assume two groups overlap unless the premises prove it.
-- The final answer must follow the exact format requested in the task. Put any brief calculation or observation check in the evidence field, not in the answer.
-
-{(
-  "RETRY REQUIRED: Your previous answer was rejected. "
-  f"Previous answer: {previous_retry.get('candidate_answer', '')}. "
-  "Do not repeat it. Re-evaluate the task and observations, and give a corrected answer."
-) if previous_retry else ""}
-
-NEXT ACTION
-Return one tool_call if a required observation is missing. Otherwise return one final answer.
+NEXT ACTION: Call the next missing allowed tool, or return the final answer.
 """
 
         can_call_product_lookup = "product_lookup" in allowed_tools
