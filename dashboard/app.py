@@ -38,15 +38,26 @@ if st.button("Run benchmark", type="primary"):
         response.raise_for_status()
         data = response.json()
         st.success(f'Run #{data["run_id"]} saved.')
-        a, b, c, d, e = st.columns(5)
+        a, b, c, d, e, f = st.columns(6)
         a.metric("Pipeline success", f'{data["task_success_rate"]:.1%}')
         b.metric(
             "Model-independent success",
             f'{data.get("model_independent_task_success_rate", data["task_success_rate"]):.1%}',
         )
         c.metric("Successful tasks", f'{data["successful_tasks"]}/{data["total_tasks"]}')
-        d.metric("Average latency", f'{data["average_latency_ms"]:.1f} ms')
-        e.metric("Engine-assisted calls", data.get("engine_assisted_tool_calls", 0))
+        d.metric(
+            "Attempted / skipped",
+            f'{data.get("attempted_tasks", data["total_tasks"])}/{data.get("skipped_tasks", 0)}',
+        )
+        e.metric("Average latency", f'{data["average_latency_ms"]:.1f} ms')
+        f.metric("Engine-assisted calls", data.get("engine_assisted_tool_calls", 0))
+        if data.get("provider_rate_limited"):
+            st.warning(
+                "Benchmark stopped because Groq rate limits were exhausted. "
+                f'{data.get("skipped_tasks", 0)} remaining task(s) were marked skipped. '
+                "See the first rate-limit error in the result table and check "
+                "your Groq Console Limits page."
+            )
         st.dataframe(pd.DataFrame(data["results"]), use_container_width=True)
         with st.expander("Execution traces and evidence"):
             for item in data["results"]:
