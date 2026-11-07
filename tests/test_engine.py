@@ -753,35 +753,47 @@ def test_engine_assisted_completion_is_not_counted_as_model_independent():
 
 
 
-def test_groq_provider_uses_hosted_chat_api_and_structured_json(monkeypatch):
+def test_groq_provider_uses_hosted_chat_api_and_native_tool_calls(monkeypatch):
     import json
     from app.providers import GroqProvider, settings
 
-    captured = {}
+    captured = []
 
     class FakeResponse:
+        def __init__(self, message):
+            self.message = message
+
         def raise_for_status(self):
             pass
 
         def json(self):
-            return {
-                "choices": [{
-                    "message": {
-                        "content": json.dumps({
-                            "type": "final",
-                            "answer": "60",
-                            "evidence": "80 less 25 percent equals 60.",
-                        })
-                    }
-                }]
-            }
+            return {"choices": [{"message": self.message}]}
 
     def fake_post(url, headers=None, json=None, timeout=None):
-        captured.update({
+        captured.append({
             "url": url, "headers": headers, "payload": json, "timeout": timeout
         })
-        return FakeResponse()
+        if json.get("tools"):
+            return FakeResponse({
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_inventory_1",
+                    "type": "function",
+                    "function": {
+                        "name": "product_lookup",
+                        "arguments": '{"sku":"SKU-BLUE-02"}',
+                    },
+                }],
+            })
+        return FakeResponse({
+            "content": json_module.dumps({
+                "type": "final",
+                "answer": "60",
+                "evidence": "80 less 25 percent equals 60.",
+            })
+        })
 
+    json_module = json
     monkeypatch.setattr(settings, "groq_api_key", "test-groq-key")
     monkeypatch.setattr("app.providers.httpx.post", fake_post)
 
@@ -793,26 +805,77 @@ def test_groq_provider_uses_hosted_chat_api_and_structured_json(monkeypatch):
         "answer": "60",
         "evidence": "80 less 25 percent equals 60.",
     }
-    assert captured["url"] == "https://api.groq.com/openai/v1/chat/completions"
-    assert captured["headers"]["Authorization"] == "Bearer test-groq-key"
-    assert captured["payload"]["model"] == "openai/gpt-oss-120b"
-    response_format = captured["payload"]["response_format"]
-    assert response_format["type"] == "json_schema"
-    assert response_format["json_schema"]["strict"] is True
-    schema = response_format["json_schema"]["schema"]
-    assert schema["type"] == "object"
-    assert schema["properties"]["type"]["enum"] == ["final"]
-    assert schema["required"] == ["type", "answer", "evidence", "tool", "arguments"]
+    final_payload = captured[-1]["payload"]
+    assert captured[-1]["url"] == "https://api.groq.com/openai/v1/chat/completions"
+    assert captured[-1]["headers"]["Authorization"] == "Bearer test-groq-key"
+    assert final_payload["model"] == "openai/gpt-oss-120b"
+    assert final_payload["response_format"]["type"] == "json_schema"
+    assert final_payload["response_format"]["json_schema"]["strict"] is True
+    assert final_payload["reasoning_effort"] == "low"
+    assert final_payload["max_completion_tokens"] == 512
 
     tool_task = next(task for task in TASKS if task["id"] == "multi_001")
-    GroqProvider().next_action(tool_task, [], "openai/gpt-oss-120b")
+    tool_action = GroqProvider().next_action(
+        tool_task, [], "openai/gpt-oss-120b"
+    )
+    assert tool_action == {
+        "type": "tool_call",
+        "tool": "product_lookup",
+        "arguments": {"sku": "SKU-BLUE-02"},
+    }
+    tool_payload = captured[-1]["payload"]
+    assert tool_payload["tool_choice"] == "required"
+    assert tool_payload["parallel_tool_calls"] is False
+    assert "response_format" not in tool_payload
+    assert tool_payload["tools"][0]["function"]["name"] == "product_lookup"
+    assert tool_payload["tools"][0]["function"]["parameters"]["required"] == ["sku"]
+    assert "GROQ_API_KEY" not in tool_payload["messages"][1]["content"]
 
-    # Tool-enabled tasks must use Groq JSON Object Mode, not Structured Outputs.
-    tool_payload = captured["payload"]
-    assert tool_payload["response_format"] == {"type": "json_object"}
-    assert captured["payload"]["reasoning_effort"] == "low"
-    assert captured["payload"]["max_completion_tokens"] == 512
-    assert "GROQ_API_KEY" not in captured["payload"]["messages"][1]["content"]
+
+def test_groq_recovery_uses_native_fallback_tool(monkeypatch):
+    import json
+    from app.providers import GroqProvider, settings
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{
+                "message": {
+                    "content": None,
+                    "tool_calls": [{
+                        "id": "call_fallback",
+                        "type": "function",
+                        "function": {
+                            "name": "product_lookup",
+                            "arguments": json.dumps({"sku": "SKU-RED-01"}),
+                        },
+                    }],
+                }
+            }]}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr(settings, "groq_api_key", "test-key")
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+    recovery_task = next(task for task in TASKS if task["id"] == "recovery_003")
+    action = GroqProvider().next_action(
+        recovery_task,
+        [{"type": "tool_error", "tool": "product_lookup", "error": "Unknown SKU"}],
+        "openai/gpt-oss-120b",
+    )
+    assert action == {
+        "type": "tool_call",
+        "tool": "product_lookup",
+        "arguments": {"sku": "SKU-RED-01"},
+    }
+    assert captured["payload"]["tool_choice"] == "required"
+    assert "SKU-RED-01" in captured["payload"]["messages"][1]["content"]
 
 
 def test_groq_provider_rejects_missing_api_key(monkeypatch):
