@@ -32,7 +32,11 @@ def test_benchmark_reports_category_level_metrics():
     assert result["category_metrics"]["planning"]["total_tasks"] == 6
     assert result["category_metrics"]["tool_use"]["successful_tasks"] == 5
     assert result["category_metrics"]["failure_recovery"] == {
-        "total_tasks": 3, "successful_tasks": 3, "task_success_rate": 1.0
+        "total_tasks": 3,
+        "attempted_tasks": 3,
+        "skipped_tasks": 0,
+        "successful_tasks": 3,
+        "task_success_rate": 1.0,
     }
 
 
