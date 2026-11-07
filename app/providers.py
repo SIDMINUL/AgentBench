@@ -355,7 +355,10 @@ def groq_chat_completion(
     *,
     max_completion_tokens: int = 512,
     response_schema: dict | None = None,
-) -> str:
+    tools: list[dict] | None = None,
+    tool_choice: str | dict | None = None,
+    return_message: bool = False,
+) -> str | dict:
     """Call Groq with bounded, header-aware handling for transient rate limits."""
     api_key = (settings.groq_api_key or "").strip()
     if not api_key:
@@ -375,7 +378,11 @@ def groq_chat_completion(
             max_completion_tokens, settings.groq_completion_tokens
         ),
     }
-    if response_schema:
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = tool_choice or "auto"
+        payload["parallel_tool_calls"] = False
+    elif response_schema:
         payload["response_format"] = {
             "type": "json_schema",
             "json_schema": {
@@ -522,10 +529,16 @@ def groq_chat_completion(
 
     try:
         data = response.json()
-        content = data["choices"][0]["message"]["content"]
+        message = data["choices"][0]["message"]
     except (ValueError, KeyError, IndexError, TypeError) as exc:
         raise ValueError("Groq returned an unexpected Chat Completions response.") from exc
 
+    if return_message:
+        if not isinstance(message, dict):
+            raise ValueError("Groq returned an invalid assistant message.")
+        return message
+
+    content = message.get("content")
     if isinstance(content, list):
         content = "".join(
             part.get("text", "") for part in content if isinstance(part, dict)
