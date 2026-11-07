@@ -557,7 +557,10 @@ def run(provider_name: str = "mock", model: str = "mock-agent") -> dict:
         item["success"] and item.get("engine_assisted_tool_calls", 0) > 0
         for item in results
     )
-    p95 = latencies[max(0, math.ceil(0.95 * total) - 1)] if total else 0.0
+    p95 = (
+        latencies[max(0, math.ceil(0.95 * len(latencies)) - 1)]
+        if latencies else 0.0
+    )
 
     category_metrics = {}
     for category in sorted({item["category"] for item in results}):
