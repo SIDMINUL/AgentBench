@@ -549,7 +549,7 @@ def groq_chat_completion(
 
 
 class GroqProvider:
-    """Hosted Groq agent provider. No local model runtime is required."""
+    """Hosted Groq agent provider using native function calling for tools."""
 
     def next_action(self, task, history, model):
         allowed_tools = task.get("tools", [])
@@ -557,6 +557,10 @@ class GroqProvider:
         completed_results = [
             item for item in history if item.get("type") == "tool_result"
         ]
+        tool_errors = [
+            item for item in history if item.get("type") == "tool_error"
+        ]
+
         pending_calls = [
             requirement for requirement in required_calls
             if not any(
@@ -568,11 +572,11 @@ class GroqProvider:
                 for item in completed_results
             )
         ]
+
         recovery = task.get("required_recovery")
         recovery_completed = bool(
             recovery and any(
-                item.get("type") == "tool_result"
-                and item.get("tool") == recovery["tool"]
+                item.get("tool") == recovery["tool"]
                 and all(
                     item.get("result", {}).get(key) == value
                     for key, value in recovery["arguments"].items()
@@ -580,6 +584,17 @@ class GroqProvider:
                 for item in completed_results
             )
         )
+        recovery_pending = bool(
+            recovery and tool_errors and not recovery_completed
+        )
+        initial_lookup_pending = bool(
+            allowed_tools and not completed_results and not tool_errors
+        )
+        must_call_tool = bool(
+            allowed_tools
+            and (pending_calls or recovery_pending or initial_lookup_pending)
+        )
+
         previous_retry = next(
             (item for item in reversed(history)
              if item.get("type") == "answer_retry_feedback"),
@@ -587,28 +602,22 @@ class GroqProvider:
         )
 
         system_prompt = (
-            "You are a reliable benchmark agent. Follow the task exactly and use "
-            "only observed tool results. Return one JSON object, no markdown. "
-            "Final: {\"type\":\"final\",\"answer\":\"exact answer\","
-            "\"evidence\":\"brief verification\",\"tool\":null,\"arguments\":null}. "
-            "Tool: {\"type\":\"tool_call\",\"answer\":null,\"evidence\":null,"
-            "\"tool\":\"product_lookup\",\"arguments\":{\"sku\":\"SKU-RED-01\"}}. "
-            "Evidence is a short audit note, not hidden chain-of-thought."
+            "You are a reliable benchmark agent. Follow the task exactly. "
+            "Use only observed tool results. When a lookup is required, call the "
+            "provided product_lookup function; do not write a tool call as JSON text. "
+            "When all required observations are available, return a final JSON object "
+            "with type, answer, and a concise evidence sentence. Evidence is an audit "
+            "note, not hidden chain-of-thought."
         )
 
-        tool_errors = [
-            item for item in history if item.get("type") == "tool_error"
-        ]
-        previous_retry = next(
-            (item for item in reversed(history)
-             if item.get("type") == "answer_retry_feedback"),
-            None,
-        )
         prompt = f"""
 TASK: {task["prompt"]}
-ALLOWED TOOLS: {json.dumps(allowed_tools)}
-REQUIRED LOOKUPS STILL MISSING: {json.dumps(pending_calls) if pending_calls else "None"}
-RECOVERY LOOKUP: {json.dumps(recovery) if recovery and not recovery_completed else "None"}
+REQUIRED LOOKUPS STILL MISSING: {
+    json.dumps(pending_calls) if pending_calls else "None"
+}
+RECOVERY LOOKUP: {
+    json.dumps(recovery) if recovery_pending else "None"
+}
 TOOL RESULTS: {json.dumps(completed_results, ensure_ascii=False)}
 TOOL ERRORS: {json.dumps(tool_errors, ensure_ascii=False)}
 PREVIOUS REJECTED ANSWER: {
@@ -619,127 +628,118 @@ PREVIOUS REJECTED ANSWER: {
 }
 
 RULES:
-- Complete each missing required lookup before answering.
-- A failed lookup gives no stock data. After failure, use the specified fallback SKU.
-- After fallback, apply that task's condition to the returned stock. Do not reuse another task's answer.
+- If a required lookup is outstanding, call product_lookup with the exact SKU.
+- If a lookup failed, use the specified fallback SKU. Never infer stock from an error.
+- After fallback, apply the original task's stock condition to the returned value.
 - Apply inequalities literally: below <, above >, at least >=, at most <=.
-- Arithmetic: calculate each operation in order; discount means subtract discount from price; ratio means scale per unit.
+- Arithmetic: calculate each operation in order; discount means subtract the discount; ratio means scale per unit.
 - Time: add every duration and break in minutes, then convert to HH:MM.
 - Logic: do not assume groups overlap unless premises prove it. Respect every dependency.
-- Reply using the exact answer format requested. Keep evidence to one short sentence.
+- Return the exact answer format requested. Keep evidence to one short sentence.
 - If the previous answer was rejected, independently recalculate and do not repeat it.
-
-NEXT ACTION: Call the next missing allowed tool, or return the final answer.
 """
 
-        can_call_product_lookup = "product_lookup" in allowed_tools
-        required_action_fields = [
-            "type", "answer", "evidence", "tool", "arguments"
-        ]
-        nullable_arguments_schema = {
-            "anyOf": [
-                {
-                    "type": "object",
-                    "properties": {"sku": {"type": "string"}},
-                    "required": ["sku"],
-                    "additionalProperties": False,
-                },
-                {"type": "null"},
-            ]
-        }
-        response_schema = {
+        final_schema = {
             "type": "object",
             "properties": {
-                "type": {
-                    "type": "string",
-                    "enum": ["final", "tool_call"] if can_call_product_lookup
-                    else ["final"],
-                },
-                "answer": {
-                    "anyOf": [{"type": "string"}, {"type": "null"}]
-                },
-                "evidence": {
-                    "anyOf": [{"type": "string"}, {"type": "null"}]
-                },
-                "tool": {
-                    "anyOf": [
-                        {"type": "string", "enum": ["product_lookup"]},
-                        {"type": "null"},
-                    ] if can_call_product_lookup else [{"type": "null"}]
-                },
-                "arguments": (
-                    nullable_arguments_schema
-                    if can_call_product_lookup else {"type": "null"}
-                ),
+                "type": {"type": "string", "enum": ["final"]},
+                "answer": {"type": "string"},
+                "evidence": {"type": "string"},
             },
-            "required": required_action_fields,
+            "required": ["type", "answer", "evidence"],
             "additionalProperties": False,
         }
-        raw = groq_chat_completion(
+
+        native_tools = None
+        tool_choice = None
+        response_schema = final_schema
+
+        if must_call_tool:
+            native_tools = [{
+                "type": "function",
+                "function": {
+                    "name": "product_lookup",
+                    "description": (
+                        "Look up a product in the AgentBench fixture inventory "
+                        "and return its SKU, name, and current stock."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "sku": {
+                                "type": "string",
+                                "description": "Exact inventory SKU to look up.",
+                            }
+                        },
+                        "required": ["sku"],
+                        "additionalProperties": False,
+                    },
+                },
+            }]
+            tool_choice = "required"
+            # Do not combine Groq native tool calling with JSON response_format.
+            response_schema = None
+
+        response = groq_chat_completion(
             model=model,
             system_prompt=system_prompt,
             user_prompt=prompt,
             max_completion_tokens=settings.groq_completion_tokens,
-            # Groq's structured-output mode is not compatible with tool use.
-            # Tool-enabled tasks return JSON actions using JSON Object Mode instead.
-            response_schema=(
-                response_schema
-                if not can_call_product_lookup
-                and model in {"openai/gpt-oss-120b", "openai/gpt-oss-20b",
-                              "qwen/qwen3.8-27b"}
-                else None
-            ),
+            response_schema=response_schema,
+            tools=native_tools,
+            tool_choice=tool_choice,
+            return_message=bool(native_tools),
         )
-        try:
-            action = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Groq did not return valid JSON: {raw[:500]}") from exc
 
-        if not isinstance(action, dict):
-            raise ValueError("Groq action must be a JSON object.")
-
-        action_type = action.get("type") or action.get("action")
-        if action_type in {"final_answer", "answer", "respond"}:
-            action_type = "final"
-        if action_type in {"tool", "call_tool", "function_call"}:
-            action_type = "tool_call"
-        if not action_type and "answer" in action:
-            action_type = "final"
-
-        if action_type == "final":
-            return {
-                "type": "final",
-                "answer": str(action.get("answer") or action.get("content") or ""),
-                "evidence": str(action.get("evidence") or action.get("reasoning") or ""),
-            }
-
-        if action_type == "tool_call":
-            tool_name = action.get("tool", action.get("tool_name", action.get("name")))
-            arguments = action.get(
-                "arguments", action.get("tool_input", action.get("parameters", {}))
-            )
+        if native_tools:
+            if not isinstance(response, dict):
+                raise ValueError("Groq returned an invalid native tool response.")
+            tool_calls = response.get("tool_calls") or []
+            if not tool_calls:
+                raise ValueError(
+                    "Groq was required to call product_lookup but returned no tool call."
+                )
+            function = tool_calls[0].get("function", {})
+            tool_name = function.get("name")
+            if tool_name not in allowed_tools:
+                raise ValueError(
+                    f"Groq requested a tool not allowed for this task: {tool_name}"
+                )
+            arguments = function.get("arguments", {})
             if isinstance(arguments, str):
                 try:
                     arguments = json.loads(arguments)
                 except json.JSONDecodeError as exc:
-                    raise ValueError("Groq returned invalid JSON tool arguments.") from exc
+                    raise ValueError(
+                        "Groq returned invalid JSON for product_lookup arguments."
+                    ) from exc
             if not isinstance(arguments, dict):
                 raise ValueError("Groq tool-call arguments must be a JSON object.")
+            if not isinstance(arguments.get("sku"), str) or not arguments["sku"].strip():
+                raise ValueError("Groq product_lookup requires a non-empty SKU.")
             return {
                 "type": "tool_call",
                 "tool": tool_name,
-                "arguments": arguments,
+                "arguments": {"sku": arguments["sku"].strip()},
             }
 
-        # Convert an empty object into an empty final so the engine's bounded
-        # answer-retry mechanism can recover rather than recording a parser crash.
-        if not action:
-            return {
-                "type": "final",
-                "answer": "",
-                "evidence": "The model returned an empty action object.",
-            }
-        raise ValueError(f"Groq returned an unsupported action schema: {raw[:500]}")
+        if not isinstance(response, str):
+            raise ValueError("Groq returned an invalid final-answer response.")
+        try:
+            action = json.loads(response)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"Groq did not return valid final-answer JSON: {response[:500]}"
+            ) from exc
+        if not isinstance(action, dict) or action.get("type") != "final":
+            raise ValueError(
+                f"Groq returned an unsupported final-answer schema: {response[:500]}"
+            )
+        return {
+            "type": "final",
+            "answer": str(action.get("answer") or ""),
+            "evidence": str(action.get("evidence") or ""),
+        }
 
 
 def get_provider(name: str):
