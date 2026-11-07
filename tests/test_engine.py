@@ -802,7 +802,8 @@ def test_groq_provider_uses_hosted_chat_api_and_structured_json(monkeypatch):
     # Tool-enabled tasks must use Groq JSON Object Mode, not Structured Outputs.
     tool_payload = captured["payload"]
     assert tool_payload["response_format"] == {"type": "json_object"}
-    assert captured["payload"]["reasoning_effort"] == "medium"
+    assert captured["payload"]["reasoning_effort"] == "low"
+    assert captured["payload"]["max_completion_tokens"] == 512
     assert "GROQ_API_KEY" not in captured["payload"]["messages"][1]["content"]
 
 
@@ -926,3 +927,118 @@ def test_comparison_ranks_by_model_independent_success_not_pipeline_success(
     )
     assert assisted["mean_task_success_rate"] == 1.0
     assert assisted["mean_model_independent_task_success_rate"] == 0.4
+
+
+def test_groq_completion_retries_after_tpm_reset_header(monkeypatch):
+    import httpx
+    from app.providers import groq_chat_completion, settings
+
+    monkeypatch.setattr(settings, "groq_api_key", "test-key")
+    monkeypatch.setattr(settings, "groq_max_retries", 2)
+    monkeypatch.setattr(settings, "groq_completion_tokens", 512)
+    waits = []
+    calls = []
+    monkeypatch.setattr("app.providers.time.sleep", waits.append)
+
+    request = httpx.Request(
+        "POST", "https://api.groq.com/openai/v1/chat/completions"
+    )
+    rate_limited = httpx.Response(
+        429,
+        headers={
+            "retry-after": "2",
+            "x-ratelimit-remaining-tokens": "0",
+            "x-ratelimit-reset-tokens": "2s",
+        },
+        json={
+            "error": {
+                "message": "Rate limit reached on tokens per minute (TPM).",
+                "type": "tokens",
+                "code": "rate_limit_exceeded",
+            }
+        },
+        request=request,
+    )
+    succeeded = httpx.Response(
+        200,
+        json={"choices": [{"message": {"content": "{\\"type\\":\\"final\\"}"}}]},
+        request=request,
+    )
+
+    def fake_post(*args, **kwargs):
+        calls.append(kwargs["json"])
+        return rate_limited if len(calls) == 1 else succeeded
+
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+    result = groq_chat_completion(
+        "openai/gpt-oss-120b", "system", "user", max_completion_tokens=2048
+    )
+
+    assert result == '{"type":"final"}'
+    assert len(calls) == 2
+    assert waits == [2.0]
+    assert calls[0]["max_completion_tokens"] == 512
+
+
+def test_groq_daily_quota_error_is_not_retried(monkeypatch):
+    import httpx
+    import pytest
+    from app.providers import GroqRateLimitError, groq_chat_completion, settings
+
+    monkeypatch.setattr(settings, "groq_api_key", "test-key")
+    calls = []
+    request = httpx.Request(
+        "POST", "https://api.groq.com/openai/v1/chat/completions"
+    )
+    response = httpx.Response(
+        429,
+        headers={"retry-after": "3600"},
+        json={
+            "error": {
+                "message": "Rate limit reached on tokens per day (TPD).",
+                "type": "tokens",
+                "code": "rate_limit_exceeded",
+            }
+        },
+        request=request,
+    )
+
+    def fake_post(*args, **kwargs):
+        calls.append(1)
+        return response
+
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+    with pytest.raises(GroqRateLimitError, match="daily Groq quota is exhausted"):
+        groq_chat_completion("openai/gpt-oss-120b", "system", "user")
+    assert len(calls) == 1
+
+
+def test_benchmark_stops_and_marks_remaining_tasks_skipped_after_groq_limit(
+    monkeypatch,
+):
+    from app import engine
+    from app.providers import GroqRateLimitError
+
+    calls = []
+
+    class RateLimitedProvider:
+        def next_action(self, task, history, model):
+            calls.append(task["id"])
+            raise GroqRateLimitError(
+                "Groq rate limit reached (429). tokens per minute.",
+                retry_after_seconds=12.0,
+            )
+
+    monkeypatch.setattr(engine, "get_provider", lambda name: RateLimitedProvider())
+    result = engine.run("groq", "openai/gpt-oss-120b")
+
+    assert calls == [TASKS[0]["id"]]
+    assert result["provider_rate_limited"] is True
+    assert result["attempted_tasks"] == 1
+    assert result["skipped_tasks"] == len(TASKS) - 1
+    assert result["total_tasks"] == len(TASKS)
+    assert result["results"][0]["status"] == "rate_limited"
+    assert all(
+        item["status"] == "skipped_rate_limit"
+        for item in result["results"][1:]
+    )
