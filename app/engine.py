@@ -4,7 +4,7 @@ import re
 import time
 from statistics import mean
 
-from app.providers import get_provider
+from app.providers import GroqRateLimitError, get_provider
 from app.tasks import TASKS
 from app.tools import execute_tool
 
@@ -456,8 +456,17 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
                 })
         except Exception as exc:
             error = str(exc)
-            status = "error"
-            trace.append({"step": step_number, "type": "error", "error": error})
+            if isinstance(exc, GroqRateLimitError):
+                status = "rate_limited"
+                trace.append({
+                    "step": step_number,
+                    "type": "rate_limit",
+                    "error": error,
+                    "retry_after_seconds": exc.retry_after_seconds,
+                })
+            else:
+                status = "error"
+                trace.append({"step": step_number, "type": "error", "error": error})
             break
 
     verification = _independent_verification(task, output) if status == "completed" else None
@@ -485,11 +494,54 @@ def run_task(task: dict, provider, provider_name: str, model: str) -> dict:
         "trace": trace,
     }
 
+def _skipped_rate_limited_result(task: dict, reason: str) -> dict:
+    return {
+        "task_id": task["id"],
+        "category": task["category"],
+        "output": "",
+        "raw_output": "",
+        "evidence": "",
+        "expected": task["expected"],
+        "verification": None,
+        "success": False,
+        "status": "skipped_rate_limit",
+        "latency_ms": 0.0,
+        "tool_calls": 0,
+        "tool_errors": 0,
+        "duplicate_tool_calls": 0,
+        "engine_assisted_tool_calls": 0,
+        "model_initiated_tool_calls": 0,
+        "engine_assisted_completion": False,
+        "model_independent_success": False,
+        "answer_retry_used": False,
+        "error": reason,
+        "trace": [],
+    }
+
+
 def run(provider_name: str = "mock", model: str = "mock-agent") -> dict:
     provider = get_provider(provider_name)
-    results = [run_task(task, provider, provider_name, model) for task in TASKS]
-    latencies = sorted(item["latency_ms"] for item in results)
+    results = []
+    rate_limit_reason = None
+    for index, task in enumerate(TASKS):
+        result = run_task(task, provider, provider_name, model)
+        results.append(result)
+        if result["status"] == "rate_limited":
+            rate_limit_reason = result.get("error") or "Groq rate limit reached."
+            for pending_task in TASKS[index + 1:]:
+                results.append(
+                    _skipped_rate_limited_result(pending_task, rate_limit_reason)
+                )
+            break
+
     total = len(results)
+    attempted_results = [
+        item for item in results if item["status"] != "skipped_rate_limit"
+    ]
+    latencies = sorted(item["latency_ms"] for item in attempted_results)
+    skipped_tasks = sum(
+        item["status"] == "skipped_rate_limit" for item in results
+    )
     passed = sum(item["success"] for item in results)
     tool_calls = sum(item["tool_calls"] for item in results)
     tool_errors = sum(item["tool_errors"] for item in results)
@@ -514,8 +566,13 @@ def run(provider_name: str = "mock", model: str = "mock-agent") -> dict:
         ]
         category_total = len(category_results)
         category_passed = sum(item["success"] for item in category_results)
+        category_skipped = sum(
+            item["status"] == "skipped_rate_limit" for item in category_results
+        )
         category_metrics[category] = {
             "total_tasks": category_total,
+            "attempted_tasks": category_total - category_skipped,
+            "skipped_tasks": category_skipped,
             "successful_tasks": category_passed,
             "task_success_rate": (
                 category_passed / category_total if category_total else 0.0
@@ -538,7 +595,11 @@ def run(provider_name: str = "mock", model: str = "mock-agent") -> dict:
         "verification_metrics": verification_metrics,
         "model": model,
         "category_metrics": category_metrics,
-        "total_tasks": total,
+        "provider_rate_limited": rate_limit_reason is not None,
+        "rate_limit_error": rate_limit_reason,
+        "attempted_tasks": total - skipped_tasks,
+        "skipped_tasks": skipped_tasks,
+        "total_tasks": len(TASKS),
         "successful_tasks": passed,
         "task_success_rate": passed / total if total else 0.0,
         "tool_calls": tool_calls,
