@@ -731,6 +731,12 @@ RULES:
             raise ValueError(
                 f"Groq did not return valid final-answer JSON: {response[:500]}"
             ) from exc
+        if isinstance(action, dict) and not action:
+            return {
+                "type": "final",
+                "answer": "",
+                "evidence": "The model returned an empty JSON object.",
+            }
         if not isinstance(action, dict) or action.get("type") != "final":
             raise ValueError(
                 f"Groq returned an unsupported final-answer schema: {response[:500]}"
