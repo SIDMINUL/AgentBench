@@ -6,6 +6,7 @@ AgentBench is a hosted LLM-agent evaluation platform for reasoning, planning, to
 
 - 22 deterministic benchmark tasks across reasoning, planning, tool use, and failure recovery
 - Per-task action traces, including tool arguments, observations, errors, retries, and concise evidence summaries
+- Groq-native function calling for inventory tools, with tool schemas and explicit required-tool selection; tool results are executed locally through the allowlisted registry
 - Exact-match task success and category-level results
 - Model-independent success separated from engine-assisted completion
 - Tool-call success, duplicate calls, tool errors, average latency, and p95 latency
