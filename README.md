@@ -13,6 +13,7 @@ AgentBench is a hosted LLM-agent evaluation platform for reasoning, planning, to
 - Repeated multi-model comparisons (1–5 repetitions per model), saved to SQLite
 - Optional Groq-powered reasoning judge; judge scores do not replace benchmark accuracy
 - Mock provider for deterministic orchestration tests; optional Ollama provider for local development
+- Groq 429 handling that respects retry/reset headers, applies bounded retries, and stops the run cleanly if the available quota is exhausted
 
 ## Groq model configuration
 
@@ -22,6 +23,8 @@ The default model is openai/gpt-oss-120b. Groq's model catalog currently lists i
 - Groq supported models: https://console.groq.com/docs/models
 
 The Groq API key is read only by the backend from GROQ_API_KEY. It is never sent to the Streamlit browser UI and must not be committed to Git.
+
+The default runtime uses a 512-token completion cap and low reasoning effort to control per-run token consumption. Groq 429 responses are retried only when the API provides a short reset window; daily quota exhaustion stops the benchmark and marks unattempted tasks as skipped.
 
 ## Run locally
 
@@ -124,6 +127,9 @@ The dashboard service needs AGENTBENCH_API_URL set to the API service's internal
 - Independent verification covers only tasks that provide a supported structured verification specification. It reports suggestions separately and never overwrites model output.
 - The inventory tool uses fixed fixture data, not a live commerce system.
 - Latency, model availability, rate limits, and output quality depend on the selected Groq model and account plan.
+- A benchmark run records Groq rate-limit headers and waits for short token-window resets when the API supplies a retry window. Daily quota exhaustion is not retried. Remaining tasks are explicitly marked skipped; they are not sent as a burst of doomed requests.
+- The agent defaults to a 512-token completion cap and low reasoning effort to keep a 22-task development run within smaller hosted quotas. Override GROQ_COMPLETION_TOKENS and GROQ_REASONING_EFFORT in deployment settings only after checking the limits for your Groq organization.
+- Check the Groq Console Limits page for the actual organization counters. Groq limits are organization-scoped and can be request-per-minute/day or token-per-minute/day; a 429 is a rate-limit response, not a model correctness score.
 - Repeated runs show variability but do not make this small benchmark statistically representative.
 - LLM judge scores are supplementary and should be calibrated against human-reviewed examples before making quality claims.
 
