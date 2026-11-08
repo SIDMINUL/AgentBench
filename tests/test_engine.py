@@ -1238,3 +1238,63 @@ def test_compare_endpoint_runs_models_concurrently_with_quick_default(
     assert data["concurrent_runs"] == 2
     assert data["total_runs"] == 2
     assert len(storage.list_runs()) == 2
+
+
+def test_public_api_requires_demo_password_when_configured(monkeypatch):
+    from app import main
+    from app.config import settings
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(settings, "app_access_password", "test-demo-password")
+    main._AUTH_FAILURES.clear()
+    main._RATE_EVENTS.clear()
+
+    client = TestClient(main.app)
+    assert client.get("/api/health").status_code == 200
+    denied = client.get("/api/tasks")
+    assert denied.status_code == 401
+    assert denied.headers["www-authenticate"].startswith("Basic")
+    accepted = client.get(
+        "/api/tasks",
+        auth=("agentbench", "test-demo-password"),
+    )
+    assert accepted.status_code == 200
+
+
+def test_public_benchmark_endpoint_has_per_ip_rate_limit(
+    monkeypatch, tmp_path
+):
+    from app import main, storage
+    from app.config import settings
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(settings, "app_access_password", "test-demo-password")
+    monkeypatch.setattr(storage, "DATABASE_PATH", tmp_path / "public-demo.db")
+    monkeypatch.setitem(main._RATE_LIMITS, "run", (1, 60))
+    main._AUTH_FAILURES.clear()
+    main._RATE_EVENTS.clear()
+    calls = []
+
+    def fake_run(provider, model):
+        calls.append(model)
+        return {
+            "provider": provider,
+            "model": model,
+            "task_success_rate": 1.0,
+            "average_latency_ms": 10.0,
+            "total_tasks": 22,
+            "successful_tasks": 22,
+        }
+
+    monkeypatch.setattr(main, "run", fake_run)
+    client = TestClient(main.app)
+    auth = ("agentbench", "test-demo-password")
+    payload = {"provider": "groq", "model": "openai/gpt-oss-120b"}
+
+    first = client.post("/api/benchmark/run", json=payload, auth=auth)
+    second = client.post("/api/benchmark/run", json=payload, auth=auth)
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert int(second.headers["retry-after"]) > 0
+    assert calls == ["openai/gpt-oss-120b"]
