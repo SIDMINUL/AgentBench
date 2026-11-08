@@ -38,9 +38,10 @@ Use Python 3.11 or newer.
     pip install -r requirements.txt
     Copy-Item .env.example .env
 
-Open .env and set your Groq API key:
+Open .env and set your Groq API key. For local development, APP_ACCESS_PASSWORD can remain blank; deployed Render services require it.
 
     GROQ_API_KEY=your_groq_api_key
+    APP_ACCESS_PASSWORD=
     DEFAULT_PROVIDER=groq
     DEFAULT_MODEL=openai/gpt-oss-120b
     DEFAULT_JUDGE_MODEL=openai/gpt-oss-120b
@@ -87,31 +88,47 @@ The API equivalent is:
 
 The comparison reports pipeline success and model-independent success separately. Rankings use mean model-independent task success first, then latency. This avoids awarding a model credit for tasks completed through engine-assisted tool calls.
 
-## Deploy on Render
+## Deploy a free, password-protected demo on Render
 
-The repository includes a render.yaml Blueprint for an API service and a Streamlit dashboard service.
+The Blueprint provisions two **Free** Render web services in Singapore:
 
-1. Push the repository to GitHub and create a new Blueprint on Render from SIDMINUL/AgentBench.
-2. When prompted, provide GROQ_API_KEY as a secret. Do not put the key in render.yaml.
-3. The Blueprint sets DEFAULT_PROVIDER=groq, DEFAULT_MODEL=openai/gpt-oss-120b, and DEFAULT_JUDGE_MODEL=openai/gpt-oss-120b.
-4. The API uses the smallest paid 0.5 CPU / 512 MB plan because it needs a persistent disk mounted at /var/data. Benchmark history is stored at /var/data/agentbench.db.
-5. The Streamlit dashboard is configured on Render's free web-service plan. It can send private-network requests to the paid API service.
-6. Once both services are live, open the dashboard service URL. Its API URL is wired to the API service over Render's private network.
+- `agentbench-api`: FastAPI + Groq, Free plan
+- `agentbench-dashboard`: Streamlit UI, Free plan
 
-The API's paid compute and 1 GB persistent disk are billable. The dashboard is configured as free. Check the current Render pricing before approving the Blueprint; Render's pricing and plan availability can change.
+The first Blueprint sync prompts for two secrets:
 
-If you create the services manually instead of using the Blueprint, set these API environment variables:
+1. `GROQ_API_KEY`: your Groq API key
+2. `APP_ACCESS_PASSWORD`: choose a strong shared password for the portfolio demo
 
-| Variable | Value |
-|---|---|
-| GROQ_API_KEY | Your Groq API key (secret) |
-| DEFAULT_PROVIDER | groq |
-| DEFAULT_MODEL | openai/gpt-oss-120b |
-| DEFAULT_JUDGE_MODEL | openai/gpt-oss-120b |
-| AGENTBENCH_DB_PATH | /var/data/agentbench.db when using a persistent disk |
-| REQUEST_TIMEOUT_SECONDS | 120 |
+Do not commit either secret. The dashboard asks visitors for APP_ACCESS_PASSWORD and sends it to the API over HTTPS using HTTP Basic authentication. The API protects all endpoints except its public health check.
 
-The dashboard service needs AGENTBENCH_API_URL set to the API service's internal URL, for example http://agentbench-api:10000 when the API service name and port match the Blueprint.
+The public demo has conservative per-IP controls: up to 3 single benchmark runs per hour, 1 model comparison per hour, and 3 judge requests per hour. A comparison is capped at 2 models and 2 repetitions. These controls reduce accidental Groq quota exhaustion; they are not a substitute for a managed identity provider or distributed abuse protection.
+
+### Free-plan limitations
+
+This configuration is intended for a portfolio/demo environment, not production:
+
+- Render Free web services spin down after 15 minutes without traffic and can take about a minute to wake up.
+- Both services share your workspace's 750 Free instance hours per calendar month.
+- Free web services have ephemeral filesystems. The SQLite run history can disappear when the API service spins down, restarts, or redeploys. This free configuration intentionally does not provision a paid persistent disk or paid database.
+- Free web services cannot receive private-network requests. The dashboard therefore calls the API through its public HTTPS URL.
+- Free bandwidth and build-pipeline allowances apply. Monitor usage in Render's Billing page; keep the workspace spend limit at $0 and avoid adding a paid service.
+- Groq Free usage is subject to model-specific organization limits. When a limit is reached, AgentBench stops or skips work instead of switching to paid usage.
+
+See Render's current free-service limitations: https://render.com/docs/free
+See Groq's current rate limits: https://console.groq.com/docs/rate-limits
+
+### Deploy steps
+
+1. Push the repository's `main` branch to GitHub.
+2. In Render, choose **New → Blueprint** and connect `SIDMINUL/AgentBench`.
+3. Review the plan. It should contain two Free web services only and no persistent disk or database.
+4. Supply `GROQ_API_KEY` and your chosen `APP_ACCESS_PASSWORD` when prompted.
+5. Apply the Blueprint. Open the `agentbench-dashboard` URL and enter the shared password in the sidebar.
+
+If Render's plan preview shows any paid resource, do not apply it. The intended demo setup should cost $0 on Render while usage stays within the included Free allowances, and $0 on Groq while the account remains on its Free tier.
+
+For a durable run history, always-on availability, higher limits, or public production use, upgrade the relevant hosting/database/API plan deliberately after reviewing the costs.
 
 ## API endpoints
 
