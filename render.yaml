@@ -2,6 +2,7 @@ services:
   - type: web
     name: agentbench-api
     runtime: docker
+    plan: 0.5c-512mb
     healthCheckPath: /api/health
     disk:
       name: agentbench-data
@@ -34,6 +35,7 @@ services:
   - type: web
     name: agentbench-dashboard
     runtime: python
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: streamlit run dashboard/app.py --server.port $PORT --server.address 0.0.0.0
     envVars:
