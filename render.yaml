@@ -1,16 +1,16 @@
 services:
   - type: web
     name: agentbench-api
-    runtime: docker
-    plan: 0.5c-512mb
+    runtime: python
+    plan: free
     region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
-    disk:
-      name: agentbench-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: GROQ_API_KEY
+        sync: false
+      - key: APP_ACCESS_PASSWORD
         sync: false
       - key: DEFAULT_PROVIDER
         value: groq
@@ -19,7 +19,7 @@ services:
       - key: DEFAULT_JUDGE_MODEL
         value: openai/gpt-oss-120b
       - key: AGENTBENCH_DB_PATH
-        value: /var/data/agentbench.db
+        value: data/agentbench.db
       - key: REQUEST_TIMEOUT_SECONDS
         value: "120"
       - key: GROQ_MAX_RETRIES
@@ -45,7 +45,7 @@ services:
         fromService:
           type: web
           name: agentbench-api
-          property: hostport
+          envVarKey: RENDER_EXTERNAL_URL
       - key: DEFAULT_MODEL
         value: openai/gpt-oss-120b
       - key: DEFAULT_JUDGE_MODEL
