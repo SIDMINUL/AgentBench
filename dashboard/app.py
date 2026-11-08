@@ -13,8 +13,19 @@ st.caption(
 
 default_api_url = os.getenv("AGENTBENCH_API_URL", "http://localhost:8000")
 if not default_api_url.startswith(("http://", "https://")):
-    default_api_url = f"http://{default_api_url}"
+    scheme = "http" if "localhost" in default_api_url else "https"
+    default_api_url = f"{scheme}://{default_api_url}"
 api_url = st.sidebar.text_input("API URL", default_api_url)
+access_password = st.sidebar.text_input(
+    "Demo access password",
+    type="password",
+    help="Enter the password supplied by the AgentBench owner.",
+)
+if not access_password:
+    st.info("Enter the AgentBench demo password in the sidebar to unlock the benchmark.")
+    st.stop()
+api_auth = ("agentbench", access_password)
+
 provider = st.sidebar.selectbox(
     "Provider",
     ["groq", "mock", "ollama"],
@@ -34,6 +45,7 @@ if st.button("Run benchmark", type="primary"):
             f"{api_url.rstrip('/')}/api/benchmark/run",
             json={"provider": provider, "model": model},
             timeout=1800,
+            auth=api_auth,
         )
         response.raise_for_status()
         data = response.json()
@@ -109,6 +121,7 @@ if st.button("Compare models"):
                         "repetitions": int(repetitions),
                     },
                     timeout=3600,
+                    auth=api_auth,
                 )
             response.raise_for_status()
             comparison = response.json()
@@ -170,6 +183,7 @@ if st.button("Evaluate saved run"):
             f"{api_url.rstrip('/')}/api/benchmark/history/{int(judge_run_id)}/judge",
             json={"judge_model": judge_model},
             timeout=600,
+            auth=api_auth,
         )
         response.raise_for_status()
         judged = response.json()
@@ -190,6 +204,7 @@ try:
         f"{api_url.rstrip('/')}/api/benchmark/history",
         params={"limit": 100},
         timeout=30,
+        auth=api_auth,
     )
     response.raise_for_status()
     runs = response.json()["runs"]
@@ -213,6 +228,7 @@ try:
             detail = httpx.get(
                 f"{api_url.rstrip('/')}/api/benchmark/history/{int(selected)}",
                 timeout=30,
+                auth=api_auth,
             )
             if detail.status_code == 404:
                 st.warning("That run ID was not found.")
