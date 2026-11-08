@@ -1192,3 +1192,49 @@ def test_groq_multi_lookup_uses_native_function_calls_until_all_observations_exi
     assert captured[1]["tool_choice"] == "required"
     assert "tools" not in captured[2]
     assert captured[2]["response_format"]["type"] == "json_schema"
+
+
+def test_compare_endpoint_runs_models_concurrently_with_quick_default(
+    monkeypatch, tmp_path
+):
+    import threading
+    from app import main, storage
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(
+        storage, "DATABASE_PATH", tmp_path / "parallel-comparison.db"
+    )
+    both_started = threading.Barrier(2)
+
+    def fake_run(provider, model):
+        both_started.wait(timeout=3)
+        return {
+            "provider": provider,
+            "model": model,
+            "task_success_rate": 1.0,
+            "successful_tasks": 22,
+            "total_tasks": 22,
+            "model_independent_task_success_rate": 1.0,
+            "model_independent_successful_tasks": 22,
+            "engine_assisted_tool_calls": 0,
+            "average_latency_ms": 500.0,
+            "p95_latency_ms": 700.0,
+            "tool_calls": 2,
+            "tool_errors": 0,
+            "duplicate_tool_calls": 0,
+            "category_metrics": {},
+            "results": [],
+        }
+
+    monkeypatch.setattr(main, "run", fake_run)
+    response = TestClient(main.app).post(
+        "/api/benchmark/compare",
+        json={"provider": "groq", "models": ["model-a", "model-b"]},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["repetitions"] == 1
+    assert data["concurrent_runs"] == 2
+    assert data["total_runs"] == 2
+    assert len(storage.list_runs()) == 2
