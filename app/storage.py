@@ -12,7 +12,7 @@ DATABASE_PATH = Path(os.getenv("AGENTBENCH_DB_PATH", "data/agentbench.db"))
 @contextmanager
 def _connect() -> Iterator[sqlite3.Connection]:
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = sqlite3.connect(DATABASE_PATH, timeout=30)
     connection.row_factory = sqlite3.Row
     try:
         connection.execute("""CREATE TABLE IF NOT EXISTS benchmark_runs (
