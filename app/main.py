@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -22,7 +24,7 @@ class RunRequest(BaseModel):
 class CompareRequest(BaseModel):
     provider: str = settings.default_provider
     models: list[str] = Field(min_length=2, max_length=8)
-    repetitions: int = Field(default=3, ge=1, le=5)
+    repetitions: int = Field(default=1, ge=1, le=5)
 
 
 class JudgeRequest(BaseModel):
@@ -79,12 +81,38 @@ def compare_models(request: CompareRequest):
         raise HTTPException(status_code=400, detail="Model names must be unique")
 
     comparisons = []
+    jobs = [
+        (model, repetition)
+        for model in models
+        for repetition in range(request.repetitions)
+    ]
+    runs_by_model = {
+        model: [None] * request.repetitions for model in models
+    }
+    max_workers = max(
+        1,
+        min(settings.benchmark_compare_concurrency, len(jobs)),
+    )
+
     try:
+        # Each model/repetition is an independent 22-task run. Run only a
+        # small number concurrently to shorten wall time without flooding
+        # Groq's organization-level rate limits.
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    lambda selected_model=model: save_run(
+                        run(request.provider, selected_model)
+                    )
+                ): (model, repetition)
+                for model, repetition in jobs
+            }
+            for future in as_completed(futures):
+                model, repetition = futures[future]
+                runs_by_model[model][repetition] = future.result()
+
         for model in models:
-            model_runs = [
-                save_run(run(request.provider, model))
-                for _ in range(request.repetitions)
-            ]
+            model_runs = runs_by_model[model]
             rates = [item["task_success_rate"] for item in model_runs]
             independent_rates = [
                 item.get("model_independent_task_success_rate", item["task_success_rate"])
@@ -149,7 +177,6 @@ def compare_models(request: CompareRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    # Rank by autonomous performance, not by tasks completed with engine assistance.
     ranked = sorted(comparisons, key=lambda item: (
         -item["mean_model_independent_task_success_rate"],
         item["mean_latency_ms"],
@@ -159,6 +186,7 @@ def compare_models(request: CompareRequest):
         "repetitions": request.repetitions,
         "comparison_count": len(comparisons),
         "total_runs": len(comparisons) * request.repetitions,
+        "concurrent_runs": max_workers,
         "ranking": ranked,
         "results": comparisons,
         "ranking_rule": (
@@ -167,7 +195,6 @@ def compare_models(request: CompareRequest):
             "are reported separately. Success-rate ranges show run-to-run variability."
         ),
     }
-
 
 @app.post("/api/benchmark/history/{run_id}/judge")
 def judge_benchmark_run(run_id: int, request: JudgeRequest):
