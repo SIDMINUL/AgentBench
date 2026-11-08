@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     groq_max_retry_wait_seconds: int = 60
     groq_completion_tokens: int = 512
     groq_reasoning_effort: str = "low"
+    benchmark_compare_concurrency: int = 2
 
     model_config = SettingsConfigDict(
         env_file=".env",
