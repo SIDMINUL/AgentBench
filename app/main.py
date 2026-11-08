@@ -1,6 +1,14 @@
+import base64
+import binascii
+import hmac
+import os
+import threading
+import time
+from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.config import settings
@@ -16,6 +24,114 @@ app = FastAPI(
 )
 
 
+# The public demo uses one shared password. Rate limits are deliberately
+# conservative because every benchmark request consumes hosted-model quota.
+_RATE_LIMITS = {
+    "run": (3, 60 * 60),
+    "compare": (1, 60 * 60),
+    "judge": (3, 60 * 60),
+}
+_RATE_EVENTS: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+_AUTH_FAILURES: dict[str, deque[float]] = defaultdict(deque)
+_RATE_LOCK = threading.Lock()
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _record_rate_event(
+    buckets: dict,
+    key,
+    limit: int,
+    window_seconds: int,
+) -> int | None:
+    now = time.monotonic()
+    with _RATE_LOCK:
+        events = buckets[key]
+        while events and now - events[0] >= window_seconds:
+            events.popleft()
+        if len(events) >= limit:
+            return max(1, int(window_seconds - (now - events[0])))
+        events.append(now)
+    return None
+
+
+@app.middleware("http")
+async def protect_public_api(request: Request, call_next):
+    path = request.url.path
+    if not path.startswith("/api/") or path == "/api/health":
+        return await call_next(request)
+
+    password = settings.app_access_password
+    if not password:
+        # Fail closed on Render if the secret was not supplied at Blueprint sync.
+        if os.getenv("RENDER"):
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Demo access is not configured. Set APP_ACCESS_PASSWORD."},
+            )
+        # Local development remains convenient unless APP_ACCESS_PASSWORD is set.
+        return await call_next(request)
+
+    ip = _client_ip(request)
+    failed_until = _record_rate_event(
+        _AUTH_FAILURES, ip, limit=10, window_seconds=15 * 60
+    )
+    if failed_until is not None:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Too many access attempts. Try again later."},
+            headers={"Retry-After": str(failed_until)},
+        )
+
+    authorization = request.headers.get("authorization", "")
+    supplied_password = ""
+    valid_header = authorization.startswith("Basic ")
+    if valid_header:
+        try:
+            decoded = base64.b64decode(authorization[6:], validate=True).decode("utf-8")
+            username, separator, supplied_password = decoded.partition(":")
+            valid_header = bool(separator and username == "agentbench")
+        except (binascii.Error, UnicodeDecodeError, ValueError):
+            valid_header = False
+
+    if not valid_header or not hmac.compare_digest(supplied_password, password):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "A valid AgentBench demo password is required."},
+            headers={"WWW-Authenticate": 'Basic realm="AgentBench demo"'},
+        )
+
+    # Per-IP, per-action throttles. The API still enforces Groq's own quotas.
+    rate_bucket = None
+    if request.method == "POST" and path == "/api/benchmark/run":
+        rate_bucket = "run"
+    elif request.method == "POST" and path == "/api/benchmark/compare":
+        rate_bucket = "compare"
+    elif request.method == "POST" and path.endswith("/judge"):
+        rate_bucket = "judge"
+
+    if rate_bucket:
+        limit, window = _RATE_LIMITS[rate_bucket]
+        retry_after = _record_rate_event(
+            _RATE_EVENTS, (ip, rate_bucket), limit, window
+        )
+        if retry_after is not None:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "detail": (
+                        f"Demo limit reached for {rate_bucket}. "
+                        f"Try again in approximately {retry_after} seconds."
+                    )
+                },
+                headers={"Retry-After": str(retry_after)},
+            )
+
+    return await call_next(request)
+
+
 class RunRequest(BaseModel):
     provider: str = settings.default_provider
     model: str = settings.default_model
@@ -23,8 +139,8 @@ class RunRequest(BaseModel):
 
 class CompareRequest(BaseModel):
     provider: str = settings.default_provider
-    models: list[str] = Field(min_length=2, max_length=8)
-    repetitions: int = Field(default=1, ge=1, le=5)
+    models: list[str] = Field(min_length=2, max_length=2)
+    repetitions: int = Field(default=1, ge=1, le=2)
 
 
 class JudgeRequest(BaseModel):
