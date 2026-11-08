@@ -94,8 +94,11 @@ The repository includes a render.yaml Blueprint for an API service and a Streaml
 1. Push the repository to GitHub and create a new Blueprint on Render from SIDMINUL/AgentBench.
 2. When prompted, provide GROQ_API_KEY as a secret. Do not put the key in render.yaml.
 3. The Blueprint sets DEFAULT_PROVIDER=groq, DEFAULT_MODEL=openai/gpt-oss-120b, and DEFAULT_JUDGE_MODEL=openai/gpt-oss-120b.
-4. The API service uses a persistent disk mounted at /var/data; benchmark history is stored at /var/data/agentbench.db.
-5. Once both services are live, open the dashboard service URL. Its API URL is wired to the API service over Render's private network.
+4. The API uses the smallest paid 0.5 CPU / 512 MB plan because it needs a persistent disk mounted at /var/data. Benchmark history is stored at /var/data/agentbench.db.
+5. The Streamlit dashboard is configured on Render's free web-service plan. It can send private-network requests to the paid API service.
+6. Once both services are live, open the dashboard service URL. Its API URL is wired to the API service over Render's private network.
+
+The API's paid compute and 1 GB persistent disk are billable. The dashboard is configured as free. Check the current Render pricing before approving the Blueprint; Render's pricing and plan availability can change.
 
 If you create the services manually instead of using the Blueprint, set these API environment variables:
 
