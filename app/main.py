@@ -75,16 +75,6 @@ async def protect_public_api(request: Request, call_next):
         return await call_next(request)
 
     ip = _client_ip(request)
-    failed_until = _record_rate_event(
-        _AUTH_FAILURES, ip, limit=10, window_seconds=15 * 60
-    )
-    if failed_until is not None:
-        return JSONResponse(
-            status_code=429,
-            content={"detail": "Too many access attempts. Try again later."},
-            headers={"Retry-After": str(failed_until)},
-        )
-
     authorization = request.headers.get("authorization", "")
     supplied_password = ""
     valid_header = authorization.startswith("Basic ")
@@ -97,6 +87,15 @@ async def protect_public_api(request: Request, call_next):
             valid_header = False
 
     if not valid_header or not hmac.compare_digest(supplied_password, password):
+        failed_until = _record_rate_event(
+            _AUTH_FAILURES, ip, limit=10, window_seconds=15 * 60
+        )
+        if failed_until is not None:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many access attempts. Try again later."},
+                headers={"Retry-After": str(failed_until)},
+            )
         return JSONResponse(
             status_code=401,
             content={"detail": "A valid AgentBench demo password is required."},
