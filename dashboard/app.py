@@ -87,7 +87,12 @@ comparison_models = st.text_input(
     comparison_default,
 )
 repetitions = st.number_input(
-    "Runs per model", min_value=1, max_value=5, value=3, step=1
+    "Runs per model (1 = quick, 3+ = more reliable but slower)",
+    min_value=1, max_value=5, value=1, step=1,
+)
+st.caption(
+    "Comparison runs models in parallel (up to 2 at a time) to reduce waiting "
+    "without sending a large burst of Groq requests."
 )
 if st.button("Compare models"):
     models = [item.strip() for item in comparison_models.split(",") if item.strip()]
