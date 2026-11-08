@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     groq_api_key: str | None = None
+    app_access_password: str | None = None
     groq_base_url: str = "https://api.groq.com/openai/v1"
     default_provider: str = "groq"
     default_model: str = "openai/gpt-oss-120b"
