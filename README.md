@@ -11,7 +11,7 @@ AgentBench is a hosted LLM-agent evaluation platform for reasoning, planning, to
 - Model-independent success separated from engine-assisted completion
 - Tool-call success, duplicate calls, tool errors, average latency, and p95 latency
 - Independent recalculation for selected arithmetic and time tasks; raw model answers are never silently replaced
-- Repeated multi-model comparisons (1–5 repetitions per model), saved to SQLite
+- Multi-model comparisons (1–5 repetitions per model) saved to SQLite, with a quick one-run default and up to two model runs executed concurrently
 - Optional Groq-powered reasoning judge; judge scores do not replace benchmark accuracy
 - Mock provider for deterministic orchestration tests; optional Ollama provider for local development
 - Groq 429 handling that respects retry/reset headers, applies bounded retries, and stops the run cleanly if the available quota is exhausted
@@ -75,11 +75,11 @@ Optional local-only Ollama use:
 
     python -m app.cli --provider ollama --model llama3.2:3b
 
-The mock provider's perfect score validates the test harness only; it is not model performance. For comparisons, use the same task set and at least three repetitions when practical.
+The mock provider's perfect score validates the test harness only; it is not model performance. The comparison UI defaults to one run per model for a quick check. Use three or more repetitions when you need a more reliable estimate; these take longer.
 
 ## Compare Groq models
 
-Via the Streamlit dashboard, select groq, enter two or more model IDs available to your Groq account, and choose 3 repetitions.
+Via the Streamlit dashboard, select groq, enter two or more model IDs available to your Groq account, and choose 1 repetition for a quick comparison or 3+ for a more reliable but slower comparison. Independent model runs execute concurrently, capped at two by default to avoid a large burst of Groq requests.
 
 The API equivalent is:
 
